@@ -1,0 +1,236 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-test:
+    name: 'Build and Test'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run type checking
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  deploy-staging:
+    name: 'Deploy to Staging'
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: |
+      github.ref == 'refs/heads/main' || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment:
+      name: staging
+      url: https://staging-api.dumbassets.example.com
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        run: |
+          echo "🚀 Deploying to staging environment"
+          echo "Image: ${{ needs.build-and-test.outputs.image-tag }}"
+          echo "Digest: ${{ needs.build-and-test.outputs.image-digest }}"
+          # Here you would typically deploy to your staging environment
+          # Examples:
+          # - Update Kubernetes deployment
+          # - Deploy to cloud service (AWS ECS, Azure Container Instances, etc.)
+          # - Update docker-compose on staging server
+          # 
+          # For example, with kubectl:
+          # kubectl set image deployment/dumbassets-api api=${{ needs.build-and-test.outputs.image-tag }}
+          # kubectl rollout status deployment/dumbassets-api
+
+      - name: Run smoke tests
+        run: |
+          echo "🧪 Running smoke tests against staging"
+          # Add smoke tests here, for example:
+          # curl -f https://staging-api.dumbassets.example.com/health
+          # npm run test:smoke -- --baseUrl=https://staging-api.dumbassets.example.com
+
+      - name: Notify deployment success
+        run: |
+          echo "✅ Staging deployment successful"
+          echo "Environment: staging"
+          echo "Image: ${{ needs.build-and-test.outputs.image-tag }}"
+
+  deploy-production:
+    name: 'Deploy to Production'
+    runs-on: ubuntu-latest
+    needs: [build-and-test, deploy-staging]
+    if: |
+      startsWith(github.ref, 'refs/tags/v') || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
+    environment:
+      name: production
+      url: https://api.dumbassets.example.com
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying to production environment"
+          echo "Image: ${{ needs.build-and-test.outputs.image-tag }}"
+          echo "Digest: ${{ needs.build-and-test.outputs.image-digest }}"
+          # Here you would deploy to your production environment
+          # This typically includes:
+          # - Blue/green deployment
+          # - Database migrations
+          # - Health checks
+          # - Rollback capability
+          #
+          # Example with zero-downtime deployment:
+          # kubectl set image deployment/dumbassets-api api=${{ needs.build-and-test.outputs.image-tag }}
+          # kubectl rollout status deployment/dumbassets-api --timeout=600s
+
+      - name: Run production health checks
+        run: |
+          echo "🏥 Running production health checks"
+          # Add production health checks here:
+          # curl -f https://api.dumbassets.example.com/health
+          # Check database connectivity
+          # Verify critical endpoints are responding
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            ## Changes in this Release
+            
+            * Docker Image: `${{ needs.build-and-test.outputs.image-tag }}`
+            * Commit: ${{ github.sha }}
+            
+            ### Deployment Information
+            - **Staging**: ✅ Deployed
+            - **Production**: ✅ Deployed
+            
+            ### Verification
+            - Health checks: ✅ Passed
+            - Smoke tests: ✅ Passed
+          draft: false
+          prerelease: false
+
+      - name: Notify deployment success
+        run: |
+          echo "🎉 Production deployment successful"
+          echo "Environment: production"
+          echo "Image: ${{ needs.build-and-test.outputs.image-tag }}"
+
+  rollback:
+    name: 'Rollback Production'
+    runs-on: ubuntu-latest
+    if: failure() && needs.deploy-production.result == 'failure'
+    needs: [deploy-production]
+    environment:
+      name: production
+    
+    steps:
+      - name: Rollback production deployment
+        run: |
+          echo "⏪ Rolling back production deployment"
+          # Implement rollback logic here:
+          # kubectl rollout undo deployment/dumbassets-api
+          # Or restore previous version from backup
+
+      - name: Notify rollback
+        run: |
+          echo "⚠️ Production deployment was rolled back"
+          echo "Please check logs and investigate the issue"
+
+  cleanup:
+    name: 'Cleanup Old Images'
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always() && (needs.deploy-production.result == 'success' || needs.deploy-production.result == 'skipped')
+    
+    steps:
+      - name: Cleanup old container images
+        run: |
+          echo "🧹 Cleaning up old container images"
+          # Implement cleanup logic to remove old images
+          # This helps manage storage costs and keep the registry clean

@@ -1,0 +1,377 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  validate-release:
+    name: 'Validate Release'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is-prerelease: ${{ steps.version.outputs.is-prerelease }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            IS_PRERELEASE="${{ github.event.inputs.prerelease }}"
+          else
+            VERSION="${{ github.ref_name }}"
+            # Check if version contains pre-release identifiers
+            if [[ "$VERSION" =~ (alpha|beta|rc|pre) ]]; then
+              IS_PRERELEASE="true"
+            else
+              IS_PRERELEASE="false"
+            fi
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is-prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          
+          echo "Release version: $VERSION"
+          echo "Is pre-release: $IS_PRERELEASE"
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: v1.0.0 or v1.0.0-beta.1"
+            exit 1
+          fi
+          echo "✅ Version format is valid"
+
+      - name: Check if tag exists
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git tag --list | grep -q "^$VERSION$"; then
+            echo "❌ Tag $VERSION already exists"
+            exit 1
+          fi
+          echo "✅ Tag $VERSION is available"
+
+  build-and-test:
+    name: 'Build and Test'
+    runs-on: ubuntu-latest
+    needs: validate-release
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dumbassets_release_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dumbassets_release_test
+      REDIS_URL: redis://localhost:6379/3
+      JWT_SECRET: release-test-jwt-secret-32-characters
+      JWT_REFRESH_SECRET: release-test-refresh-secret-32-char
+      ENCRYPTION_KEY: release-test-encryption-key-32-char
+      SESSION_SECRET: release-test-session-secret-32-char
+      USE_EMBEDDED_DB: false
+      USE_EMBEDDED_REDIS: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run type checking
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+
+      - name: Run database migrations
+        run: npm run prisma:migrate
+
+      - name: Run full test suite
+        run: |
+          npm run test:unit
+          npm run test:integration
+          # npm run test:e2e  # Uncomment when E2E tests are ready
+
+      - name: Generate test coverage
+        run: npm run test:coverage
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ needs.validate-release.outputs.version }}
+          path: |
+            coverage/
+            test-results/
+          retention-days: 90
+
+  build-docker-image:
+    name: 'Build Docker Image'
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-and-test]
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tags: ${{ steps.meta.outputs.tags }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.validate-release.outputs.version }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}},value=${{ needs.validate-release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.validate-release.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.validate-release.outputs.version }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ needs.validate-release.outputs.version }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-release.outputs.version }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ needs.validate-release.outputs.version }}
+          path: sbom.spdx.json
+          retention-days: 90
+
+  security-scan:
+    name: 'Security Scan'
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-docker-image]
+    
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate-release.outputs.version }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-${{ needs.validate-release.outputs.version }}
+          path: trivy-results.sarif
+          retention-days: 90
+
+  create-release:
+    name: 'Create GitHub Release'
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-and-test, build-docker-image, security-scan]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "Generating changelog from $PREVIOUS_TAG to $VERSION"
+            CHANGELOG=$(git log --pretty=format:"* %s (%h)" $PREVIOUS_TAG..HEAD | head -50)
+          else
+            echo "No previous tag found, showing recent commits"
+            CHANGELOG=$(git log --pretty=format:"* %s (%h)" HEAD~10..HEAD)
+          fi
+          
+          # Save changelog to file for the release body
+          cat > CHANGELOG.md << EOF
+          ## 🚀 What's New in $VERSION
+          
+          ### Changes
+          $CHANGELOG
+          
+          ### 📦 Docker Image
+          \`\`\`bash
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION
+          \`\`\`
+          
+          ### 🔒 Security
+          - Docker image has been scanned for vulnerabilities
+          - All dependencies have been audited
+          - SBOM (Software Bill of Materials) is available in release assets
+          
+          ### 📋 Verification
+          - ✅ All tests passed
+          - ✅ Type checking passed
+          - ✅ Linting passed
+          - ✅ Security scan completed
+          - ✅ Multi-architecture Docker image built (linux/amd64, linux/arm64)
+          
+          ### 🔗 Links
+          - **Docker Image**: [\`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION\`](https://github.com/${{ github.repository }}/pkgs/container/${{ github.event.repository.name }})
+          - **Commit**: [\`${{ github.sha }}\`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          EOF
+          
+          echo "changelog-file=CHANGELOG.md" >> $GITHUB_OUTPUT
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-${{ needs.validate-release.outputs.version }}'
+          merge-multiple: true
+
+      - name: Create Git tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.validate-release.outputs.version }}" -m "Release ${{ needs.validate-release.outputs.version }}"
+          git push origin "${{ needs.validate-release.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate-release.outputs.version }}
+          name: Release ${{ needs.validate-release.outputs.version }}
+          body_path: ${{ steps.changelog.outputs.changelog-file }}
+          draft: false
+          prerelease: ${{ needs.validate-release.outputs.is-prerelease == 'true' }}
+          files: |
+            sbom.spdx.json
+            trivy-results.sarif
+          generate_release_notes: false
+
+  notify-release:
+    name: 'Notify Release'
+    runs-on: ubuntu-latest
+    needs: [validate-release, create-release]
+    if: always()
+    
+    steps:
+      - name: Release notification
+        run: |
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          STATUS="${{ needs.create-release.result }}"
+          
+          if [ "$STATUS" = "success" ]; then
+            echo "🎉 Release $VERSION was created successfully!"
+            echo "📦 Docker image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
+            echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/$VERSION"
+          else
+            echo "❌ Release $VERSION failed with status: $STATUS"
+            exit 1
+          fi
+
+      - name: Update deployment status
+        if: needs.create-release.result == 'success'
+        run: |
+          echo "✅ Release ${{ needs.validate-release.outputs.version }} is ready for deployment"
+          echo "Next steps:"
+          echo "1. Deploy to staging environment"
+          echo "2. Run smoke tests"
+          echo "3. Deploy to production environment"
+          echo "4. Monitor application health"

@@ -1,0 +1,261 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enums
+enum UserRole {
+  OWNER
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum TaskStatus {
+  PLANNED
+  IN_PROGRESS
+  DONE
+  SKIPPED
+}
+
+enum TaskPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// Core entities for Phase 1
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  ownerUserId String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner  User?   @relation("OrganizationOwner", fields: [ownerUserId], references: [id])
+  users  User[]  @relation("OrganizationMembers")
+  assets Asset[]
+  tasks  Task[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  passwordHash   String? // Optional for OIDC-only users
+  role           UserRole @default(MEMBER)
+  fullName       String?
+  organizationId String
+  totpSecret     String? // For 2FA
+  totpEnabled    Boolean  @default(false)
+  emailVerified  Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization     @relation("OrganizationMembers", fields: [organizationId], references: [id], onDelete: Cascade)
+  ownedOrganization Organization?    @relation("OrganizationOwner")
+  taskAssignments   TaskAssignment[]
+  taskComments      TaskComment[]
+  sessions          Session[]
+  apiTokens         ApiToken[]
+  TaskAttachment    TaskAttachment[]
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  token        String   @unique
+  refreshToken String?  @unique
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("sessions")
+}
+
+model ApiToken {
+  id        String    @id @default(uuid())
+  userId    String
+  name      String
+  token     String    @unique
+  lastUsed  DateTime?
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("api_tokens")
+}
+
+// Asset management (core fields for migration)
+model Asset {
+  id                      String    @id @default(uuid())
+  organizationId          String
+  name                    String
+  manufacturer            String?
+  modelNumber             String?
+  serialNumber            String?
+  purchaseDate            DateTime?
+  purchasePrice           Decimal?  @db.Decimal(10, 2)
+  description             String?
+  link                    String?
+  tags                    String[]
+  warrantyScope           String?
+  warrantyExpiry          DateTime?
+  warrantyLifetime        Boolean   @default(false)
+  secondaryWarrantyScope  String?
+  secondaryWarrantyExpiry DateTime?
+  photoPath               String? // Path to main photo
+  receiptPath             String? // Path to receipt
+  manualPath              String? // Path to manual
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  components   Component[]
+  tasks        Task[]
+
+  @@index([organizationId])
+  @@map("assets")
+}
+
+// Components (sub-assets)
+model Component {
+  id               String    @id @default(uuid())
+  assetId          String
+  parentId         String? // For sub-components
+  name             String
+  manufacturer     String?
+  modelNumber      String?
+  serialNumber     String?
+  purchaseDate     DateTime?
+  purchasePrice    Decimal?  @db.Decimal(10, 2)
+  description      String?
+  link             String?
+  tags             String[]
+  warrantyScope    String?
+  warrantyExpiry   DateTime?
+  warrantyLifetime Boolean   @default(false)
+  photoPath        String?
+  receiptPath      String?
+  manualPath       String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  asset    Asset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  parent   Component?  @relation("ComponentHierarchy", fields: [parentId], references: [id])
+  children Component[] @relation("ComponentHierarchy")
+
+  @@index([assetId])
+  @@index([parentId])
+  @@map("components")
+}
+
+// Basic task management for Phase 1
+model Task {
+  id               String       @id @default(uuid())
+  organizationId   String
+  assetId          String?
+  title            String
+  description      String?
+  dueDate          DateTime
+  status           TaskStatus   @default(PLANNED)
+  priority         TaskPriority @default(MEDIUM)
+  estimatedCost    Decimal?     @db.Decimal(10, 2)
+  actualCost       Decimal?     @db.Decimal(10, 2)
+  estimatedMinutes Int?
+  actualMinutes    Int?
+  completedAt      DateTime?
+  skippedAt        DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  asset        Asset?           @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assignments  TaskAssignment[]
+  comments     TaskComment[]
+  attachments  TaskAttachment[]
+
+  @@index([organizationId])
+  @@index([assetId])
+  @@index([dueDate])
+  @@index([status])
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  id         String   @id @default(uuid())
+  taskId     String
+  userId     String
+  assignedAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_assignments")
+}
+
+model TaskComment {
+  id        String   @id @default(uuid())
+  taskId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_comments")
+}
+
+model TaskAttachment {
+  id               String   @id @default(uuid())
+  taskId           String
+  uploadedByUserId String
+  originalFilename String
+  storedFilename   String
+  fileSizeBytes    Int
+  mimeType         String
+  uploadDate       DateTime @default(now())
+
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy User @relation(fields: [uploadedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([uploadedByUserId])
+  @@map("task_attachments")
+}
+
+// Schema migration tracking
+model SchemaMigration {
+  id        String   @id @default(uuid())
+  version   String   @unique
+  name      String
+  appliedAt DateTime @default(now())
+  checksum  String
+
+  @@map("schema_migrations")
+}

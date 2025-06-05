@@ -1,0 +1,416 @@
+name: Performance Testing
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, labeled]
+  schedule:
+    # Run performance tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test-duration:
+        description: 'Test duration (in seconds)'
+        required: false
+        default: '60'
+        type: string
+      target-rps:
+        description: 'Target requests per second'
+        required: false
+        default: '100'
+        type: string
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  performance-test:
+    name: 'Performance Testing'
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'performance'))
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dumbassets_perf
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dumbassets_perf
+      REDIS_URL: redis://localhost:6379/2
+      JWT_SECRET: perf-test-jwt-secret-32-characters-long
+      JWT_REFRESH_SECRET: perf-test-refresh-secret-32-characters
+      ENCRYPTION_KEY: perf-test-encryption-key-32-characters
+      SESSION_SECRET: perf-test-session-secret-32-characters
+      USE_EMBEDDED_DB: false
+      USE_EMBEDDED_REDIS: false
+      LOG_LEVEL: error
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Run database migrations
+        run: npm run prisma:migrate
+
+      - name: Build application
+        run: npm run build
+
+      - name: Seed performance test data
+        run: |
+          echo "🌱 Seeding performance test data..."
+          # Create test script to seed database with realistic data
+          cat > seed-perf-data.js << 'EOF'
+          const { PrismaClient } = require('@prisma/client');
+          const bcrypt = require('bcrypt');
+          
+          const prisma = new PrismaClient();
+          
+          async function seed() {
+            console.log('Creating test organizations...');
+            
+            // Create test organizations
+            const orgs = [];
+            for (let i = 0; i < 10; i++) {
+              const org = await prisma.organization.create({
+                data: {
+                  name: `Test Organization ${i + 1}`,
+                },
+              });
+              orgs.push(org);
+            }
+            
+            console.log('Creating test users...');
+            
+            // Create test users (100 users across organizations)
+            const users = [];
+            for (let i = 0; i < 100; i++) {
+              const orgIndex = i % orgs.length;
+              const passwordHash = await bcrypt.hash('TestPassword123!', 10);
+              
+              const user = await prisma.user.create({
+                data: {
+                  email: `testuser${i + 1}@example.com`,
+                  passwordHash,
+                  fullName: `Test User ${i + 1}`,
+                  role: i === 0 ? 'OWNER' : 'MEMBER',
+                  organizationId: orgs[orgIndex].id,
+                  emailVerified: true,
+                  isActive: true,
+                },
+              });
+              users.push(user);
+              
+              // Update organization owner
+              if (i % 10 === 0) {
+                await prisma.organization.update({
+                  where: { id: orgs[orgIndex].id },
+                  data: { ownerUserId: user.id },
+                });
+              }
+            }
+            
+            console.log('Creating test assets...');
+            
+            // Create test assets (1000 assets across organizations)
+            for (let i = 0; i < 1000; i++) {
+              const orgIndex = i % orgs.length;
+              
+              await prisma.asset.create({
+                data: {
+                  name: `Test Asset ${i + 1}`,
+                  manufacturer: `Manufacturer ${(i % 20) + 1}`,
+                  modelNumber: `MODEL-${String(i + 1).padStart(4, '0')}`,
+                  serialNumber: `SN${String(i + 1).padStart(6, '0')}`,
+                  purchaseDate: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000),
+                  purchasePrice: Math.floor(Math.random() * 10000) + 100,
+                  description: `Description for test asset ${i + 1}`,
+                  tags: [`tag${(i % 10) + 1}`, `category${(i % 5) + 1}`],
+                  warrantyLifetime: i % 10 === 0,
+                  organizationId: orgs[orgIndex].id,
+                },
+              });
+            }
+            
+            console.log('✅ Performance test data seeded successfully');
+          }
+          
+          seed()
+            .catch((e) => {
+              console.error(e);
+              process.exit(1);
+            })
+            .finally(async () => {
+              await prisma.$disconnect();
+            });
+          EOF
+          
+          node seed-perf-data.js
+
+      - name: Start application
+        run: |
+          npm start &
+          APP_PID=$!
+          echo "APP_PID=$APP_PID" >> $GITHUB_ENV
+          
+          # Wait for application to start
+          echo "⏳ Waiting for application to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:3001/health > /dev/null; then
+              echo "✅ Application is running"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+
+      - name: Install Artillery
+        run: npm install -g artillery
+
+      - name: Create performance test configuration
+        run: |
+          cat > performance-test.yml << 'EOF'
+          config:
+            target: 'http://localhost:3001'
+            phases:
+              - duration: ${{ github.event.inputs.test-duration || '60' }}
+                arrivalRate: ${{ github.event.inputs.target-rps || '10' }}
+                name: "Load test phase"
+            processor: "./test-processor.js"
+            variables:
+              testUsers: []
+          
+          scenarios:
+            - name: "Health check"
+              weight: 10
+              flow:
+                - get:
+                    url: "/health"
+                    expect:
+                      - statusCode: 200
+            
+            - name: "Authentication flow"
+              weight: 30
+              flow:
+                - post:
+                    url: "/api/auth/register"
+                    json:
+                      email: "loadtest{{ $randomString() }}@example.com"
+                      password: "LoadTest123!"
+                      fullName: "Load Test User"
+                      organizationName: "Load Test Org {{ $randomString() }}"
+                    expect:
+                      - statusCode: 201
+                    capture:
+                      - json: "$.accessToken"
+                        as: "accessToken"
+                
+                - get:
+                    url: "/api/users/{{ $capture.userId }}"
+                    headers:
+                      Authorization: "Bearer {{ accessToken }}"
+                    expect:
+                      - statusCode: [200, 404]
+            
+            - name: "API browsing"
+              weight: 60
+              flow:
+                # Login with existing user
+                - post:
+                    url: "/api/auth/login"
+                    json:
+                      email: "testuser1@example.com"
+                      password: "TestPassword123!"
+                    expect:
+                      - statusCode: 200
+                    capture:
+                      - json: "$.accessToken"
+                        as: "accessToken"
+                      - json: "$.user.id"
+                        as: "userId"
+                
+                # Browse organization
+                - get:
+                    url: "/api/organizations/{{ $capture.orgId }}"
+                    headers:
+                      Authorization: "Bearer {{ accessToken }}"
+                    expect:
+                      - statusCode: [200, 404]
+          EOF
+
+      - name: Create test processor
+        run: |
+          cat > test-processor.js << 'EOF'
+          function generateRandomString() {
+            return Math.random().toString(36).substring(2, 15);
+          }
+          
+          module.exports = {
+            setRandomString: function(context, events, done) {
+              context.vars.$randomString = generateRandomString;
+              return done();
+            }
+          };
+          EOF
+
+      - name: Run performance tests
+        run: |
+          echo "🚀 Starting performance tests..."
+          
+          # Run Artillery performance test
+          artillery run performance-test.yml \
+            --output performance-report.json \
+            --config '{"target": "http://localhost:3001"}'
+          
+          echo "📊 Generating performance report..."
+          artillery report performance-report.json --output performance-report.html
+
+      - name: Analyze performance results
+        run: |
+          echo "📈 Analyzing performance results..."
+          
+          # Extract key metrics from the report
+          node -e "
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('performance-report.json', 'utf8'));
+          
+          const aggregate = report.aggregate;
+          
+          console.log('🎯 Performance Test Results:');
+          console.log('================================');
+          console.log('Total Requests:', aggregate.counters['http.requests'] || 0);
+          console.log('Successful Requests:', aggregate.counters['http.responses'] || 0);
+          console.log('Failed Requests:', aggregate.counters['http.request_timeouts'] || 0);
+          console.log('Average Response Time:', Math.round(aggregate.latency?.mean || 0), 'ms');
+          console.log('95th Percentile:', Math.round(aggregate.latency?.p95 || 0), 'ms');
+          console.log('99th Percentile:', Math.round(aggregate.latency?.p99 || 0), 'ms');
+          console.log('Max Response Time:', Math.round(aggregate.latency?.max || 0), 'ms');
+          console.log('Requests/Second:', Math.round(aggregate.rates?.['http.request_rate'] || 0));
+          
+          // Performance thresholds
+          const avgResponseTime = aggregate.latency?.mean || 0;
+          const p95ResponseTime = aggregate.latency?.p95 || 0;
+          const errorRate = ((aggregate.counters['http.request_timeouts'] || 0) / (aggregate.counters['http.requests'] || 1)) * 100;
+          
+          console.log('\\n🎯 Performance Analysis:');
+          console.log('========================');
+          
+          if (avgResponseTime > 500) {
+            console.log('⚠️ Average response time is above 500ms threshold');
+            process.exit(1);
+          } else {
+            console.log('✅ Average response time is within acceptable limits');
+          }
+          
+          if (p95ResponseTime > 1000) {
+            console.log('⚠️ 95th percentile response time is above 1000ms threshold');
+            process.exit(1);
+          } else {
+            console.log('✅ 95th percentile response time is within acceptable limits');
+          }
+          
+          if (errorRate > 5) {
+            console.log('⚠️ Error rate is above 5% threshold');
+            process.exit(1);
+          } else {
+            console.log('✅ Error rate is within acceptable limits');
+          }
+          
+          console.log('\\n🎉 All performance thresholds passed!');
+          "
+
+      - name: Upload performance artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-test-results
+          path: |
+            performance-report.json
+            performance-report.html
+          retention-days: 30
+
+      - name: Comment performance results on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('performance-report.json', 'utf8'));
+            const aggregate = report.aggregate;
+            
+            const avgResponseTime = Math.round(aggregate.latency?.mean || 0);
+            const p95ResponseTime = Math.round(aggregate.latency?.p95 || 0);
+            const totalRequests = aggregate.counters['http.requests'] || 0;
+            const successfulRequests = aggregate.counters['http.responses'] || 0;
+            const errorRate = ((aggregate.counters['http.request_timeouts'] || 0) / totalRequests * 100).toFixed(2);
+            
+            const body = `## 📈 Performance Test Results
+            
+            | Metric | Value |
+            |--------|-------|
+            | Total Requests | ${totalRequests} |
+            | Successful Requests | ${successfulRequests} |
+            | Error Rate | ${errorRate}% |
+            | Average Response Time | ${avgResponseTime}ms |
+            | 95th Percentile | ${p95ResponseTime}ms |
+            | Max Response Time | ${Math.round(aggregate.latency?.max || 0)}ms |
+            | Requests/Second | ${Math.round(aggregate.rates?.['http.request_rate'] || 0)} |
+            
+            ### Thresholds
+            - ✅ Average response time < 500ms: **${avgResponseTime < 500 ? 'PASS' : 'FAIL'}**
+            - ✅ 95th percentile < 1000ms: **${p95ResponseTime < 1000 ? 'PASS' : 'FAIL'}**
+            - ✅ Error rate < 5%: **${errorRate < 5 ? 'PASS' : 'FAIL'}**
+            
+            ---
+            📊 Full performance report available in workflow artifacts.`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Stop application
+        if: always()
+        run: |
+          if [ ! -z "$APP_PID" ]; then
+            kill $APP_PID || true
+          fi

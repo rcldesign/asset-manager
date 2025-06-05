@@ -1,0 +1,471 @@
+import { Router, type Request, type Response, type NextFunction } from 'express';
+import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
+import { UserService } from '../services/user.service';
+import { OrganizationService } from '../services/organization.service';
+import { generateTokens, verifyRefreshToken, generateQRCode } from '../utils/auth';
+import { ValidationError } from '../utils/errors';
+import { authenticateJWT, type AuthenticatedRequest } from '../middleware/auth';
+import { validateRequest, authSchemas, commonSchemas } from '../middleware/validation';
+
+const router = Router();
+const userService = new UserService();
+const organizationService = new OrganizationService();
+
+// Rate limiting for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 requests per windowMs
+  message: 'Too many authentication attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const twoFactorLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 3, // Limit each IP to 3 2FA attempts per windowMs
+  message: 'Too many 2FA attempts, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * @swagger
+ * /api/auth/register:
+ *   post:
+ *     summary: Register a new user and organization
+ *     description: Create a new user account and organization. The user becomes the organization owner.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - organizationName
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User email address
+ *                 example: john@example.com
+ *               password:
+ *                 type: string
+ *                 minLength: 8
+ *                 description: User password (minimum 8 characters)
+ *                 example: SecurePass123!
+ *               fullName:
+ *                 type: string
+ *                 description: User full name
+ *                 example: John Doe
+ *               organizationName:
+ *                 type: string
+ *                 description: Organization name
+ *                 example: Acme Corp
+ *     responses:
+ *       201:
+ *         description: User and organization created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/AuthTokens'
+ *                 - type: object
+ *                   properties:
+ *                     organization:
+ *                       $ref: '#/components/schemas/Organization'
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ValidationError'
+ *       409:
+ *         description: Email already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       429:
+ *         description: Too many registration attempts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post(
+  '/register',
+  authLimiter,
+  validateRequest({ body: authSchemas.register }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, password, fullName, organizationName } = req.body;
+
+      // Create organization first
+      const organization = await organizationService.createOrganization({
+        name: organizationName,
+      });
+
+      // Create user as organization owner
+      const user = await userService.createUser({
+        email,
+        password,
+        fullName,
+        role: 'OWNER',
+        organizationId: organization.id,
+      });
+
+      // Set user as organization owner
+      await organizationService.setOwner(organization.id, user.id);
+
+      // Generate tokens
+      const tokens = generateTokens({
+        userId: user.id,
+        organizationId: user.organizationId,
+        role: user.role,
+      });
+
+      res.status(201).json({
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role,
+          organizationId: user.organizationId,
+          emailVerified: user.emailVerified,
+          totpEnabled: user.totpEnabled,
+        },
+        organization: {
+          id: organization.id,
+          name: organization.name,
+        },
+        tokens,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+/**
+ * @swagger
+ * /api/auth/login:
+ *   post:
+ *     summary: Authenticate user
+ *     description: Authenticate user with email and password. Returns JWT tokens on success.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User email address
+ *                 example: john@example.com
+ *               password:
+ *                 type: string
+ *                 description: User password
+ *                 example: SecurePass123!
+ *               totpToken:
+ *                 type: string
+ *                 pattern: '^[0-9]{6}$'
+ *                 description: TOTP token (required if 2FA is enabled)
+ *                 example: '123456'
+ *     responses:
+ *       200:
+ *         description: Login successful or 2FA required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               oneOf:
+ *                 - $ref: '#/components/schemas/AuthTokens'
+ *                 - type: object
+ *                   properties:
+ *                     requiresTwoFactor:
+ *                       type: boolean
+ *                       example: true
+ *                     message:
+ *                       type: string
+ *                       example: Please provide your 2FA code
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ValidationError'
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       429:
+ *         description: Too many login attempts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ */
+router.post(
+  '/login',
+  authLimiter,
+  validateRequest({ body: authSchemas.login }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { email, password, totpToken } = req.body;
+
+      const authResult = await userService.authenticateUser(email, password, totpToken);
+
+      if (authResult.requiresTwoFactor) {
+        res.json({
+          requiresTwoFactor: true,
+          message: 'Please provide your 2FA code',
+        });
+        return;
+      }
+
+      // Generate tokens
+      const tokens = generateTokens({
+        userId: authResult.id,
+        organizationId: authResult.organizationId,
+        role: authResult.role,
+      });
+
+      res.json({
+        user: {
+          id: authResult.id,
+          email: authResult.email,
+          fullName: authResult.fullName,
+          role: authResult.role,
+          organizationId: authResult.organizationId,
+        },
+        tokens,
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/refresh',
+  validateRequest({ body: authSchemas.refreshToken }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { refreshToken } = req.body;
+
+      const payload = verifyRefreshToken(refreshToken);
+
+      // Verify user still exists and is active
+      const user = await userService.getUserById(payload.userId);
+      if (!user || !user.isActive) {
+        throw new ValidationError('User not found or inactive');
+      }
+
+      // Generate new tokens
+      const tokens = generateTokens({
+        userId: user.id,
+        organizationId: user.organizationId,
+        role: user.role,
+      });
+
+      res.json({ tokens });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post('/logout', authenticateJWT, (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    // In a full implementation, you might want to blacklist the JWT token
+    // For now, we'll just return success since JWTs are stateless
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/me', authenticateJWT, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const authenticatedReq = req as AuthenticatedRequest;
+    const user = await userService.getUserById(authenticatedReq.user.id);
+
+    if (!user) {
+      throw new ValidationError('User not found');
+    }
+
+    res.json({
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      organizationId: user.organizationId,
+      emailVerified: user.emailVerified,
+      totpEnabled: user.totpEnabled,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  '/change-password',
+  authenticateJWT,
+  validateRequest({ body: authSchemas.changePassword }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authenticatedReq = req as AuthenticatedRequest;
+      const { currentPassword, newPassword } = req.body;
+
+      await userService.changePassword(authenticatedReq.user.id, {
+        currentPassword,
+        newPassword,
+      });
+
+      res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// 2FA Setup Routes
+router.post(
+  '/2fa/setup',
+  authenticateJWT,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authenticatedReq = req as AuthenticatedRequest;
+
+      const totpSecret = await userService.setupTwoFactor(
+        authenticatedReq.user.id,
+        authenticatedReq.user.email,
+      );
+
+      // Generate QR code for easier setup
+      const qrCodeDataUrl = await generateQRCode(totpSecret.qrCodeUrl);
+
+      res.json({
+        secret: totpSecret.secret,
+        qrCode: qrCodeDataUrl,
+        manualEntryKey: totpSecret.manualEntryKey,
+        message:
+          'Scan the QR code with your authenticator app and verify with a token to enable 2FA',
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/2fa/enable',
+  authenticateJWT,
+  twoFactorLimiter,
+  validateRequest({ body: authSchemas.setupTwoFactor }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authenticatedReq = req as AuthenticatedRequest;
+      const { totpToken } = req.body;
+
+      await userService.enableTwoFactor(authenticatedReq.user.id, totpToken);
+
+      res.json({ message: '2FA enabled successfully' });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  '/2fa/disable',
+  authenticateJWT,
+  twoFactorLimiter,
+  validateRequest({ body: authSchemas.setupTwoFactor }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authenticatedReq = req as AuthenticatedRequest;
+      const { totpToken } = req.body;
+
+      await userService.disableTwoFactor(authenticatedReq.user.id, totpToken);
+
+      res.json({ message: '2FA disabled successfully' });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+// API Token Management
+router.get('/tokens', authenticateJWT, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const authenticatedReq = req as AuthenticatedRequest;
+    const tokens = await userService.getUserApiTokens(authenticatedReq.user.id);
+
+    res.json({ tokens });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post(
+  '/tokens',
+  authenticateJWT,
+  validateRequest({ body: authSchemas.createApiToken }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authenticatedReq = req as AuthenticatedRequest;
+      const { name, expiresAt } = req.body;
+
+      const apiToken = await userService.createApiToken(authenticatedReq.user.id, {
+        name,
+        expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+      });
+
+      res.status(201).json({
+        id: apiToken.id,
+        name: apiToken.name,
+        token: apiToken.token,
+        expiresAt: apiToken.expiresAt,
+        message:
+          'API token created successfully. This is the only time you will see the token value.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.delete(
+  '/tokens/:tokenId',
+  authenticateJWT,
+  validateRequest({ params: z.object({ tokenId: commonSchemas.id }) }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const authenticatedReq = req as AuthenticatedRequest;
+      const { tokenId } = req.params as { tokenId: string };
+
+      await userService.deleteApiToken(authenticatedReq.user.id, tokenId);
+
+      res.json({ message: 'API token deleted successfully' });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+export default router;

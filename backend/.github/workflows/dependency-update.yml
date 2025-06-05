@@ -1,0 +1,221 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    # Run every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  dependency-review:
+    name: 'Dependency Review'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD
+
+  security-audit:
+    name: 'Security Audit'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: |
+          # Generate audit report
+          npm audit --json > audit-report.json || true
+          
+          # Check for high/critical vulnerabilities
+          HIGH_VULNS=$(npm audit --audit-level=high --json | jq '.metadata.vulnerabilities.high // 0')
+          CRITICAL_VULNS=$(npm audit --audit-level=high --json | jq '.metadata.vulnerabilities.critical // 0')
+          
+          echo "High vulnerabilities: $HIGH_VULNS"
+          echo "Critical vulnerabilities: $CRITICAL_VULNS"
+          
+          if [ "$HIGH_VULNS" -gt 0 ] || [ "$CRITICAL_VULNS" -gt 0 ]; then
+            echo "⚠️ Security vulnerabilities found!"
+            npm audit
+            exit 1
+          else
+            echo "✅ No high or critical vulnerabilities found"
+          fi
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-audit-report
+          path: audit-report.json
+          retention-days: 30
+
+  dependabot-auto-merge:
+    name: 'Auto-merge Dependabot PRs'
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' &&
+      github.actor == 'dependabot[bot]'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Approve and merge Dependabot PR
+        if: |
+          steps.dependabot-metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.dependabot-metadata.outputs.update-type == 'version-update:semver-minor'
+        run: |
+          # Check if all status checks have passed
+          gh pr checks "${{ github.event.number }}" --watch
+          
+          # Approve the PR
+          gh pr review "${{ github.event.number }}" --approve --body "Auto-approving Dependabot PR for patch/minor version update"
+          
+          # Enable auto-merge
+          gh pr merge "${{ github.event.number }}" --auto --squash --delete-branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-lockfile:
+    name: 'Update Package Lock'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Update package-lock.json
+        run: |
+          # Update package-lock.json without changing package.json
+          npm update --package-lock-only
+          
+          # Check if there are any changes
+          if git diff --quiet package-lock.json; then
+            echo "No updates available"
+            echo "has-updates=false" >> $GITHUB_OUTPUT
+          else
+            echo "Updates available"
+            echo "has-updates=true" >> $GITHUB_OUTPUT
+          fi
+        id: update-check
+
+      - name: Create Pull Request
+        if: steps.update-check.outputs.has-updates == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update package-lock.json'
+          title: 'chore: update package-lock.json'
+          body: |
+            ## Package Lock Update
+            
+            This PR updates the `package-lock.json` file to ensure we're using the latest compatible versions of our dependencies.
+            
+            ### Changes
+            - Updated package-lock.json with latest compatible dependency versions
+            
+            ### Verification
+            - [ ] All tests pass
+            - [ ] No breaking changes introduced
+            - [ ] Security audit passes
+            
+            ---
+            *This PR was automatically created by the dependency update workflow*
+          branch: chore/update-package-lock
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
+
+  license-check:
+    name: 'License Compliance Check'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install license checker
+        run: npm install -g license-checker
+
+      - name: Check licenses
+        run: |
+          # Generate license report
+          license-checker --json --production > licenses.json
+          
+          # Check for forbidden licenses
+          FORBIDDEN_LICENSES=(
+            "GPL-2.0"
+            "GPL-3.0"
+            "AGPL-1.0"
+            "AGPL-3.0"
+            "LGPL-2.0"
+            "LGPL-2.1"
+            "LGPL-3.0"
+          )
+          
+          for license in "${FORBIDDEN_LICENSES[@]}"; do
+            if license-checker --production --onlyAllow "$license" 2>/dev/null | grep -q "found"; then
+              echo "❌ Forbidden license found: $license"
+              exit 1
+            fi
+          done
+          
+          echo "✅ All licenses are compliant"
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-report
+          path: licenses.json
+          retention-days: 30

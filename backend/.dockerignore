@@ -1,0 +1,84 @@
+# Dependency directories
+node_modules/
+npm-debug.log*
+
+# Build output (we build inside Docker)
+dist/
+
+# Test and coverage files
+coverage/
+test-results/
+.nyc_output/
+*.test.ts
+*.spec.ts
+__tests__/
+src/test/
+
+# Environment files
+.env*
+!.env.example
+.npmrc
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git and CI/CD
+.git/
+.gitignore
+.github/
+
+# Docker files
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Configuration files we don't need in container
+.eslintrc*
+.prettierrc*
+jest.config.*
+tsconfig.json
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+
+# Temporary folders
+tmp/
+temp/
+
+# Build artifacts
+.cache/
+
+# Local database files
+*.db
+*.sqlite
+
+# AWS and cloud configs
+.aws/
+.gcp/
+
+# Other development files
+.husky/
