@@ -27,7 +27,7 @@ const config: Config = {
       statements: 80,
     },
   },
-  setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
+  setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts', '<rootDir>/src/test/prisma-singleton.ts'],
   testTimeout: 10000,
   clearMocks: true,
   restoreMocks: true,
@@ -43,7 +43,7 @@ const config: Config = {
     '<rootDir>/coverage/',
   ],
   transformIgnorePatterns: [
-    'node_modules/(?!(openid-client|oauth4webapi)/)',
+    'node_modules/(?!(openid-client|oauth4webapi|jose)/)',
   ],
   transform: {
     '^.+\\.(ts|tsx)$': ['ts-jest', {

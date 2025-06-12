@@ -1,8 +1,14 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
-import request from 'supertest';
+import { describe, test, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import type { Application } from 'express';
-import { createTestApp, setupTestDatabase, cleanupTestDatabase, testDataGenerators, integrationAssertions } from './app.setup';
-import { TestDatabaseHelper, TestAPIHelper } from '../helpers';
+import {
+  createTestApp,
+  setupTestDatabase,
+  cleanupTestDatabase,
+  testDataGenerators,
+  integrationAssertions,
+} from './app.setup';
+import type { TestDatabaseHelper } from '../helpers';
+import { TestAPIHelper } from '../helpers';
 
 describe('Authentication API Integration Tests', () => {
   let app: Application;
@@ -27,10 +33,7 @@ describe('Authentication API Integration Tests', () => {
     test('should register a new user successfully', async () => {
       const userData = testDataGenerators.validUser();
 
-      const response = await api.request
-        .post('/api/auth/register')
-        .send(userData)
-        .expect(201);
+      const response = await api.request.post('/api/auth/register').send(userData).expect(201);
 
       expect(response.body).toHaveProperty('user');
       expect(response.body).toHaveProperty('organization');
@@ -52,10 +55,7 @@ describe('Authentication API Integration Tests', () => {
         email: 'invalid-email',
       };
 
-      const response = await api.request
-        .post('/api/auth/register')
-        .send(userData)
-        .expect(400);
+      const response = await api.request.post('/api/auth/register').send(userData).expect(400);
 
       integrationAssertions.expectErrorResponse(response, 400);
       expect(response.body.error).toContain('email');
@@ -67,10 +67,7 @@ describe('Authentication API Integration Tests', () => {
         password: '123',
       };
 
-      const response = await api.request
-        .post('/api/auth/register')
-        .send(userData)
-        .expect(400);
+      const response = await api.request.post('/api/auth/register').send(userData).expect(400);
 
       integrationAssertions.expectErrorResponse(response, 400);
       expect(response.body.error).toContain('Password');
@@ -80,10 +77,7 @@ describe('Authentication API Integration Tests', () => {
       const userData = testDataGenerators.validUser();
 
       // Register first user
-      await api.request
-        .post('/api/auth/register')
-        .send(userData)
-        .expect(201);
+      await api.request.post('/api/auth/register').send(userData).expect(201);
 
       // Try to register with same email
       const duplicateUserData = {
@@ -100,10 +94,7 @@ describe('Authentication API Integration Tests', () => {
     });
 
     test('should reject registration without required fields', async () => {
-      const response = await api.request
-        .post('/api/auth/register')
-        .send({})
-        .expect(400);
+      const response = await api.request.post('/api/auth/register').send({}).expect(400);
 
       integrationAssertions.expectErrorResponse(response, 400);
     });
@@ -113,17 +104,11 @@ describe('Authentication API Integration Tests', () => {
     test('should login user with valid credentials', async () => {
       // First register a user
       const userData = testDataGenerators.validUser();
-      await api.request
-        .post('/api/auth/register')
-        .send(userData)
-        .expect(201);
+      await api.request.post('/api/auth/register').send(userData).expect(201);
 
       // Now login
       const loginData = testDataGenerators.validLogin(userData.email);
-      const response = await api.request
-        .post('/api/auth/login')
-        .send(loginData)
-        .expect(200);
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(200);
 
       expect(response.body).toHaveProperty('user');
       expect(response.body).toHaveProperty('tokens');
@@ -136,11 +121,8 @@ describe('Authentication API Integration Tests', () => {
 
     test('should reject login with invalid email', async () => {
       const loginData = testDataGenerators.validLogin('nonexistent@example.com');
-      
-      const response = await api.request
-        .post('/api/auth/login')
-        .send(loginData)
-        .expect(400);
+
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(400);
 
       integrationAssertions.expectErrorResponse(response, 400);
     });
@@ -148,10 +130,7 @@ describe('Authentication API Integration Tests', () => {
     test('should reject login with invalid password', async () => {
       // Register a user
       const userData = testDataGenerators.validUser();
-      await api.request
-        .post('/api/auth/register')
-        .send(userData)
-        .expect(201);
+      await api.request.post('/api/auth/register').send(userData).expect(201);
 
       // Try login with wrong password
       const loginData = {
@@ -159,10 +138,7 @@ describe('Authentication API Integration Tests', () => {
         password: 'WrongPassword123!',
       };
 
-      const response = await api.request
-        .post('/api/auth/login')
-        .send(loginData)
-        .expect(400);
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(400);
 
       integrationAssertions.expectErrorResponse(response, 400);
     });
@@ -170,31 +146,28 @@ describe('Authentication API Integration Tests', () => {
     test('should require 2FA when enabled', async () => {
       // Register and login user
       const userData = testDataGenerators.validUser();
-      const registerResponse = await api.request
-        .post('/api/auth/register')
-        .send(userData);
+      const registerResponse = await api.request.post('/api/auth/register').send(userData);
 
       const { accessToken } = registerResponse.body.tokens;
 
       // Setup 2FA
-      const setupResponse = await api.authenticatedRequest(accessToken)
+      const setupResponse = await api
+        .authenticatedRequest(accessToken)
         .post('/api/auth/2fa/setup')
         .expect(200);
 
       expect(setupResponse.body).toHaveProperty('secret');
 
       // Enable 2FA (mock valid token)
-      await api.authenticatedRequest(accessToken)
+      await api
+        .authenticatedRequest(accessToken)
         .post('/api/auth/2fa/enable')
         .send({ totpToken: '123456' })
         .expect(200);
 
       // Now try to login - should require 2FA
       const loginData = testDataGenerators.validLogin(userData.email);
-      const response = await api.request
-        .post('/api/auth/login')
-        .send(loginData)
-        .expect(200);
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(200);
 
       expect(response.body).toHaveProperty('requiresTwoFactor', true);
       expect(response.body).toHaveProperty('message');
@@ -242,10 +215,7 @@ describe('Authentication API Integration Tests', () => {
     });
 
     test('should reject refresh without token', async () => {
-      const response = await api.request
-        .post('/api/auth/refresh')
-        .send({})
-        .expect(400);
+      const response = await api.request.post('/api/auth/refresh').send({}).expect(400);
 
       integrationAssertions.expectErrorResponse(response, 400);
     });
@@ -262,18 +232,14 @@ describe('Authentication API Integration Tests', () => {
 
       const { accessToken } = registerResponse.body.tokens;
 
-      const response = await api.authenticatedRequest(accessToken)
-        .get('/api/auth/me')
-        .expect(200);
+      const response = await api.authenticatedRequest(accessToken).get('/api/auth/me').expect(200);
 
       integrationAssertions.expectValidUser(response.body);
       expect(response.body.email).toBe(userData.email);
     });
 
     test('should reject request without token', async () => {
-      const response = await api.request
-        .get('/api/auth/me')
-        .expect(401);
+      const response = await api.request.get('/api/auth/me').expect(401);
 
       integrationAssertions.expectErrorResponse(response, 401);
     });
@@ -299,7 +265,8 @@ describe('Authentication API Integration Tests', () => {
 
       const { accessToken } = registerResponse.body.tokens;
 
-      const response = await api.authenticatedRequest(accessToken)
+      const response = await api
+        .authenticatedRequest(accessToken)
         .post('/api/auth/logout')
         .expect(200);
 
@@ -307,9 +274,7 @@ describe('Authentication API Integration Tests', () => {
     });
 
     test('should reject logout without token', async () => {
-      const response = await api.request
-        .post('/api/auth/logout')
-        .expect(401);
+      const response = await api.request.post('/api/auth/logout').expect(401);
 
       integrationAssertions.expectErrorResponse(response, 401);
     });
@@ -332,7 +297,8 @@ describe('Authentication API Integration Tests', () => {
         newPassword: 'NewTestPassword456!',
       };
 
-      const response = await api.authenticatedRequest(accessToken)
+      const response = await api
+        .authenticatedRequest(accessToken)
         .post('/api/auth/change-password')
         .send(passwordData)
         .expect(200);
@@ -367,7 +333,8 @@ describe('Authentication API Integration Tests', () => {
         newPassword: 'NewTestPassword456!',
       };
 
-      const response = await api.authenticatedRequest(accessToken)
+      const response = await api
+        .authenticatedRequest(accessToken)
         .post('/api/auth/change-password')
         .send(passwordData)
         .expect(400);
@@ -391,7 +358,8 @@ describe('Authentication API Integration Tests', () => {
         newPassword: '123',
       };
 
-      const response = await api.authenticatedRequest(accessToken)
+      const response = await api
+        .authenticatedRequest(accessToken)
         .post('/api/auth/change-password')
         .send(passwordData)
         .expect(400);
@@ -402,24 +370,21 @@ describe('Authentication API Integration Tests', () => {
 
   describe('API Token Management', () => {
     let accessToken: string;
-    let userId: string;
 
     beforeEach(async () => {
       // Register user and get token
       const userData = testDataGenerators.validUser();
-      const registerResponse = await api.request
-        .post('/api/auth/register')
-        .send(userData);
+      const registerResponse = await api.request.post('/api/auth/register').send(userData);
 
       accessToken = registerResponse.body.tokens.accessToken;
-      userId = registerResponse.body.user.id;
     });
 
     describe('POST /api/auth/tokens', () => {
       test('should create API token successfully', async () => {
         const tokenData = testDataGenerators.validApiToken();
 
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .post('/api/auth/tokens')
           .send(tokenData)
           .expect(201);
@@ -435,7 +400,8 @@ describe('Authentication API Integration Tests', () => {
           expiresAt: new Date(Date.now() + 86400000).toISOString(), // 1 day
         };
 
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .post('/api/auth/tokens')
           .send(tokenData)
           .expect(201);
@@ -445,7 +411,8 @@ describe('Authentication API Integration Tests', () => {
       });
 
       test('should reject API token creation without name', async () => {
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .post('/api/auth/tokens')
           .send({})
           .expect(400);
@@ -460,15 +427,12 @@ describe('Authentication API Integration Tests', () => {
         const tokenData1 = testDataGenerators.validApiToken();
         const tokenData2 = testDataGenerators.validApiToken();
 
-        await api.authenticatedRequest(accessToken)
-          .post('/api/auth/tokens')
-          .send(tokenData1);
+        await api.authenticatedRequest(accessToken).post('/api/auth/tokens').send(tokenData1);
 
-        await api.authenticatedRequest(accessToken)
-          .post('/api/auth/tokens')
-          .send(tokenData2);
+        await api.authenticatedRequest(accessToken).post('/api/auth/tokens').send(tokenData2);
 
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .get('/api/auth/tokens')
           .expect(200);
 
@@ -485,7 +449,8 @@ describe('Authentication API Integration Tests', () => {
       });
 
       test('should return empty list for user with no tokens', async () => {
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .get('/api/auth/tokens')
           .expect(200);
 
@@ -499,22 +464,23 @@ describe('Authentication API Integration Tests', () => {
       test('should delete API token successfully', async () => {
         // Create token
         const tokenData = testDataGenerators.validApiToken();
-        const createResponse = await api.authenticatedRequest(accessToken)
+        const createResponse = await api
+          .authenticatedRequest(accessToken)
           .post('/api/auth/tokens')
           .send(tokenData);
 
         const tokenId = createResponse.body.id;
 
         // Delete token
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .delete(`/api/auth/tokens/${tokenId}`)
           .expect(200);
 
         expect(response.body).toHaveProperty('message');
 
         // Verify token is deleted
-        const listResponse = await api.authenticatedRequest(accessToken)
-          .get('/api/auth/tokens');
+        const listResponse = await api.authenticatedRequest(accessToken).get('/api/auth/tokens');
 
         expect(listResponse.body.tokens.length).toBe(0);
       });
@@ -522,7 +488,8 @@ describe('Authentication API Integration Tests', () => {
       test('should reject deletion of non-existent token', async () => {
         const fakeTokenId = '123e4567-e89b-12d3-a456-426614174000';
 
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .delete(`/api/auth/tokens/${fakeTokenId}`)
           .expect(400);
 
@@ -530,7 +497,8 @@ describe('Authentication API Integration Tests', () => {
       });
 
       test('should reject deletion with invalid token ID format', async () => {
-        const response = await api.authenticatedRequest(accessToken)
+        const response = await api
+          .authenticatedRequest(accessToken)
           .delete('/api/auth/tokens/invalid-id')
           .expect(400);
 

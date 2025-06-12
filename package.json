@@ -1,34 +1,45 @@
 {
-  "name": "dumbassets",
-  "version": "1.0.0",
-  "description": "Asset tracking application for managing assets and their components",
-  "main": "server.js",
+  "name": "dumbassets-enhanced",
+  "version": "2.0.0",
+  "description": "Asset tracking application for managing assets and their components with advanced maintenance management capabilities",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "npm-run-all --parallel dev:*",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "start": "npm run start --workspace=backend",
+    "lint": "npm run lint --workspace=backend && npm run lint --workspace=frontend",
+    "lint:fix": "npm run lint:fix --workspace=backend && npm run lint:fix --workspace=frontend",
+    "format": "npm run format --workspace=backend && npm run format --workspace=frontend",
+    "format:check": "npm run format:check --workspace=backend && npm run format:check --workspace=frontend",
+    "typecheck": "npm run typecheck --workspace=backend && npm run typecheck --workspace=frontend",
+    "test": "npm run test --workspace=backend && npm run test --workspace=frontend",
+    "test:unit": "npm run test:unit --workspace=backend",
+    "test:integration": "npm run test:integration --workspace=backend",
+    "test:e2e": "npm run test:e2e --workspace=backend && npm run test:e2e --workspace=frontend",
+    "test:coverage": "npm run test:coverage --workspace=backend",
+    "prisma:generate": "npm run prisma:generate --workspace=backend",
+    "prisma:migrate": "npm run prisma:migrate --workspace=backend",
+    "prisma:studio": "npm run prisma:studio --workspace=backend"
   },
   "keywords": [
     "asset",
     "tracking",
     "inventory",
-    "management"
+    "management",
+    "maintenance",
+    "scheduling"
   ],
   "author": "DumbWare",
-  "dependencies": {
-    "chart.js": "^4.4.9",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "dotenv": "^16.5.0",
-    "express": "^4.18.2",
-    "express-session": "^1.18.1",
-    "helmet": "^8.1.0",
-    "luxon": "^3.6.1",
-    "multer": "^2.0.0",
-    "node-cron": "^3.0.3",
-    "uuid": "^9.0.0",
-    "xlsx": "^0.18.5"
-  },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.8.3",
+    "eslint": "^9.28.0",
+    "prettier": "^3.5.3"
   }
 }

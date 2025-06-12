@@ -1,5 +1,6 @@
-# DumbAssets
-A stupid simple asset tracker for keeping track of your physical assets, their components, and applicable warranties and routine maintenance.
+# DumbAssets Enhanced
+
+A comprehensive enterprise-ready asset management system with advanced features for tracking physical assets, maintenance schedules, and compliance documentation.
 
 <p align="center">
   <img width=75% src="https://github.com/user-attachments/assets/ec310325-c3e4-4fc1-ba53-5cca5cd74c85" />
@@ -27,120 +28,197 @@ A stupid simple asset tracker for keeping track of your physical assets, their c
 
 ### Prerequisites
 
-- Docker (recommended)
-- Node.js >=14.0.0 (for local development)
+- Docker and Docker Compose (recommended)
+- Node.js >=20.0.0 (for local development)
+- PostgreSQL 15+ (optional, if not using embedded)
+- Redis 7+ (optional, if not using embedded)
 
-### Option 1: Docker (For Dummies)
-
-```sh
-docker run -p 3000:3000 -v ./data:/app/data dumbwareio/dumbassets:latest
-```
-
-1. Go to [http://localhost:3000](http://localhost:3000)
-2. Add assets, upload photos/receipts, and track warranties
-3. Celebrate how dumb easy this was
-
-### Option 2: Docker Compose (For Dummies who like customizing)
-
-Create a `docker-compose.yml` file:
-
-```yaml
-services:
-  dumbassets:
-    container_name: dumbassets
-    image: dumbwareio/dumbassets:latest
-    restart: unless-stopped
-    ports: 
-      - ${DUMBASSETS_PORT:-3000}:3000
-    volumes:
-      - ${DUMBASSETS_DATA_PATH:-./data}:/app/data
-    environment:
-      NODE_ENV: ${DUMBASSETS_NODE_ENV:-production}
-      DEBUG: ${DUMBASSETS_DEBUG:-true}
-      SITE_TITLE: ${DUMBASSETS_SITE_TITLE:-DumbAssets}
-      BASE_URL: ${DUMBASSETS_BASE_URL:-http://localhost:3000}
-      DUMBASSETS_PIN: ${DUMBASSETS_PIN:-1234}
-      ALLOWED_ORIGINS: ${DUMBASSETS_ALLOWED_ORIGINS:-*}
-      APPRISE_URL: ${DUMBASSETS_APPRISE_URL:-}
-      # ...other env vars
-```
-
-Then run:
+### Option 1: Docker Compose - Development
 
 ```sh
-docker compose up -d
+# Clone the repository
+git clone https://github.com/yourusername/asset-manager.git
+cd asset-manager
+
+# Copy environment example
+cp .env.example .env
+
+# Start development containers
+docker compose -f docker-compose.dev.yml up -d
 ```
 
-1. Go to [http://localhost:3000](http://localhost:3000)
-2. Add and manage your assets
+1. Go to [http://localhost:3001](http://localhost:3001)
+2. Default admin credentials will be created on first run
+3. Start managing your assets!
 
-### Option 3: Running Locally (For Developers)
+### Option 2: Docker Compose - Production
 
 ```sh
-git clone https://github.com/yourusername/DumbAssets.git
-cd DumbAssets
+# Copy and customize environment
+cp .env.example .env
+# Edit .env with your production values
+
+# Start production container
+docker compose -f docker-compose.prod.yml up -d
+```
+
+The production setup includes:
+- Embedded PostgreSQL and Redis (or external if configured)
+- Automatic database migrations
+- Health checks and auto-restart
+- Persistent data volumes
+
+### Option 3: External Database Setup
+
+To use external PostgreSQL and Redis:
+
+1. Edit your `.env` file:
+```env
+USE_EMBEDDED_DB=false
+DATABASE_URL=postgresql://user:password@host:5432/dumbassets
+USE_EMBEDDED_REDIS=false
+REDIS_URL=redis://host:6379
+```
+
+2. Uncomment the external services in `docker-compose.dev.yml`
+3. Start with: `docker compose -f docker-compose.dev.yml up -d`
+
+### Option 4: Local Development
+
+```sh
+# Backend setup
+cd backend
 npm install
-npm start
-```
+cp .env.example .env
+npm run prisma:migrate
+npm run dev
 
-Open your browser to [http://localhost:3000](http://localhost:3000)
+# Frontend (when available)
+cd ../frontend
+npm install
+npm run dev
+```
 
 ---
 
 ## Features
 
-- 🚀 Track assets with detailed info (model, serial, warranty, etc.)
-- 🧩 Add components and sub-components
-- 🖼️ Upload and store photos and receipts
-- 🔍 Search by name, model, serial, or description
-- 🏷️ Hierarchical organization of components
-- 📅 Warranty expiration notifications (configurable)
-- 🔧 Maintenance event notifications
-- 🏷️ Flexible tagging system for better organization
-- 🔔 Built in Apprise notification integration
+### Core Asset Management
+- 🚀 Comprehensive asset tracking with full lifecycle management
+- 🧩 Hierarchical components and sub-components
+- 🖼️ Document management with encryption (photos, receipts, manuals)
+- 🔍 Advanced search with filters and saved queries
+- 🏷️ Flexible tagging and categorization system
+- 📊 Asset depreciation tracking
+- 🔗 QR code generation and scanning
+
+### Maintenance & Compliance
+- 📅 Scheduled maintenance with automated reminders
+- 🔧 Maintenance history and cost tracking
+- ⚠️ Warranty expiration notifications
+- 📋 Compliance documentation and audit trails
+- 🏥 Health checks and condition monitoring
+
+### Enterprise Features
+- 🛡️ Multi-factor authentication (TOTP, SMS, Email)
+- 👥 Role-based access control (Admin, Manager, User, Viewer)
+- 🔐 OIDC/SSO integration
+- 📧 Email notifications with templates
+- 🔔 Multi-channel alerts (Apprise, SMS, Teams, Slack)
+- 🌐 Multi-tenant support (planned)
+
+### Technical Capabilities
+- 📦 Single container deployment with embedded databases
+- 🔄 Real-time updates with WebSocket support
+- 📈 Performance monitoring and metrics
 - 🌗 Light/Dark mode with theme persistence
-- 🛡️ PIN authentication with brute force protection
-- 📦 Docker support for easy deployment
-- 🔗 Direct Asset Linking: Notifications include links to the specific asset
+- 💾 SMB/CIFS file storage integration
+- 🗓️ Google Calendar integration for maintenance
 
 ## Configuration
 
-### Environment Variables
+### Core Environment Variables
 
-| Variable         | Description                                 | Default            | Required |
-|------------------|---------------------------------------------|--------------------|----------|
-| PORT             | Server port                                 | 3000               | No       |
-| DUMBASSETS_PIN   | PIN protection (4+ digits)                  | None               | No       |
-| APPRISE_URL      | Apprise URL for notifications               | None               | No       |
-| TZ               | Container timezone                          | America/Chicago    | No       |
-| BASE_URL         | Base URL for the application                | http://localhost   | No       |
-| SITE_TITLE       | Site title shown in browser tab and header  | DumbAssets         | No       |
-| ALLOWED_ORIGINS  | Origins allowed to visit your instance      | '*'                | No       |
-| DEMO_MODE        | Enables read-only mode                      | false              | No       |
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| NODE_ENV | Environment (development/production) | development | No |
+| PORT | Server port | 3001 | No |
+| BASE_URL | Base URL for the application | http://localhost:3001 | No |
+| ALLOWED_ORIGINS | CORS allowed origins | * | No |
+
+### Database Configuration
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| USE_EMBEDDED_DB | Use embedded PostgreSQL | true | No |
+| DATABASE_URL | External PostgreSQL URL | - | If not embedded |
+| USE_EMBEDDED_REDIS | Use embedded Redis | true | No |
+| REDIS_URL | External Redis URL | - | If not embedded |
+
+### Security Configuration
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| JWT_SECRET | JWT signing secret | - | Yes (production) |
+| JWT_REFRESH_SECRET | JWT refresh token secret | - | Yes (production) |
+| SESSION_SECRET | Session encryption secret | - | Yes (production) |
+| ENCRYPTION_KEY | 32-byte data encryption key | - | Yes (production) |
+
+### Optional Services
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| SMTP_HOST | Email server host | - | No |
+| SMTP_PORT | Email server port | - | No |
+| SMTP_USER | Email username | - | No |
+| SMTP_PASSWORD | Email password | - | No |
+| OIDC_ISSUER_URL | OIDC provider URL | - | No |
+| OIDC_CLIENT_ID | OIDC client ID | - | No |
+| OIDC_CLIENT_SECRET | OIDC client secret | - | No |
+| APPRISE_URL | Apprise notification URL | - | No |
 
 > [!TIP]
-> Apprise integration is built-in to DumbAssets, allowing you to simply add your Discord/ntfy/Telegram/etc link WITHOUT having to run Apprise as a separate service!
+> The embedded PostgreSQL and Redis make deployment incredibly simple - just run the container and you're done!
 
 ### Data Storage
 
-All data is stored in JSON files in the `/data` directory:
+#### Production Data Volumes
+- `/var/lib/postgresql/data` - PostgreSQL database
+- `/var/lib/redis` - Redis cache and session data
+- `/app/uploads` - File attachments (encrypted)
 
-- `/data/Assets.json` - All asset data
-- `/data/SubAssets.json` - All component data
-- `/data/Images` - Uploaded photos
-- `/data/Receipts` - Uploaded receipts
-- `/data/config.json` - Notification and app config
+#### Volume Mapping
+```yaml
+volumes:
+  - ./data:/var/lib/postgresql/data
+  - ./redis:/var/lib/redis
+  - ./uploads:/app/uploads
+```
 
 ---
 
 ## Security
 
-- Variable-length PIN support (4+ digits)
-- Constant-time PIN comparison
-- Brute force protection (lockout after too many attempts)
-- Secure session cookies
-- No client-side PIN storage
-- Rate limiting
+### Authentication & Authorization
+- Multi-factor authentication (TOTP, SMS, Email)
+- Role-based access control (RBAC)
+- OIDC/SSO integration support
+- JWT-based API authentication
+- Session management with Redis
+
+### Data Protection
+- AES-256 encryption for sensitive data
+- File encryption at rest
+- TLS/HTTPS enforcement
+- SQL injection prevention
+- XSS protection with CSP headers
+- Rate limiting and DDoS protection
+
+### Compliance
+- Audit logging for all actions
+- GDPR-compliant data handling
+- Configurable data retention
+- Export and deletion capabilities
 
 ---
 
@@ -148,29 +226,39 @@ All data is stored in JSON files in the `/data` directory:
 
 ### Stack
 
-- **Backend:** Node.js (>=14.0.0) with Express
-- **Frontend:** Vanilla JavaScript (ES6+)
-- **Container:** Docker with Alpine base
-- **Notifications:** Apprise integration (via Python)
-- **Uploads:** Multer for file handling
-- **Scheduling:** node-cron for warranty & Maintenance notifications
+- **Backend:** Node.js 20+ with Express 5
+- **Database:** PostgreSQL 15 (embedded or external)
+- **Cache:** Redis 7 (embedded or external)
+- **Container:** Docker with Alpine Linux
+- **Process Manager:** Supervisor for embedded services
+- **ORM:** Prisma with migrations
+- **API:** RESTful with OpenAPI documentation
 
-### Dependencies
-- **express**: Web framework for Node.js
-- **multer**: File upload handling and multipart/form-data parsing
-- **apprise**: Notification system integration for alerts
-- **cors**: Cross-origin resource sharing middleware
-- **dotenv**: Environment variable configuration management
-- **express-rate-limit**: Rate limiting middleware for API protection
-- **express-session**: Session management and authentication
-- **cookie-parser**: Cookie parsing middleware
-- **node-cron**: Task scheduling for notifications
-- **uuid**: Unique ID generation for assets
-- **sharp**: Image processing and optimization
-- **compression**: Response compression middleware
-- **helmet**: Security headers middleware
-- **fs-extra**: Enhanced filesystem operations
-- **path**: Path manipulation utilities
+### Key Dependencies
+
+#### Backend Core
+- **express**: Modern web framework
+- **prisma**: Type-safe database ORM
+- **bull**: Job queue for background tasks
+- **ioredis**: Redis client for caching
+- **helmet**: Security headers
+- **joi/zod**: Input validation
+
+#### Authentication
+- **jsonwebtoken**: JWT implementation
+- **bcrypt**: Password hashing
+- **speakeasy**: TOTP/2FA support
+- **openid-client**: OIDC integration
+
+#### File Handling
+- **multer**: File upload processing
+- **sharp**: Image optimization
+- **crypto-js**: File encryption
+
+#### Monitoring
+- **swagger**: API documentation
+- **winston**: Structured logging
+- **node-cron**: Scheduled tasks
 
 ---
 

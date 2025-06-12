@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # The Reverse Proxy
+  proxy:
+    image: nginx:1.23-alpine
+    volumes:
+      # Mount our dev-specific nginx config
+      - ./nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80" # Map host port 80 to container port 80
+    depends_on:
+      - frontend
+      - backend
+
+  # The Frontend Service (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      # Mount source code for hot-reloading
+      - ./frontend:/app
+      # Anonymous volume to prevent host node_modules from overwriting container's
+      - /app/node_modules
+    environment:
+      # This is critical. The browser-side code needs to know the API is at the root path.
+      # The proxy will route it.
+      - NEXT_PUBLIC_API_URL=/api 
+      - NODE_ENV=development
+    # Optional: expose port for direct access/debugging
+    ports:
+      - "3000:3000"
+    
+  # The Backend Service (Express)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    volumes:
+      # Mount source code for hot-reloading
+      - ./backend:/app
+      # Anonymous volume to prevent host node_modules from overwriting container's
+      - /app/node_modules
+    environment:
+      # The backend needs its own variables
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://dumbassets:dumbassets@host.docker.internal:5432/dumbassets_dev
+      - REDIS_URL=redis://host.docker.internal:6379
+      # This tells the CORS middleware which origin to allow
+      - ALLOWED_ORIGINS=http://localhost
+      - JWT_SECRET=dev-secret-key-change-in-production-32chars
+      - JWT_REFRESH_SECRET=dev-refresh-secret-change-in-production-32chars
+      - ENCRYPTION_KEY=dev-encryption-key-change-in-production-32chars
+      - SESSION_SECRET=dev-session-secret-change-in-production
+    ports:
+      # Expose port for direct access/debugging
+      - "3001:3001"
+    # Use host networking to access local PostgreSQL and Redis
+    # In production, these would be separate services
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

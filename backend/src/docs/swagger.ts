@@ -382,19 +382,65 @@ const swaggerDefinition = {
       AuthTokens: {
         type: 'object',
         properties: {
-          accessToken: {
-            type: 'string',
-            description: 'JWT access token',
-          },
-          refreshToken: {
-            type: 'string',
-            description: 'JWT refresh token',
+          tokens: {
+            type: 'object',
+            properties: {
+              accessToken: {
+                type: 'string',
+                description: 'JWT access token (15 minutes expiry)',
+              },
+              refreshToken: {
+                type: 'string',
+                description: 'JWT refresh token (7 days expiry)',
+              },
+              accessTokenExpiry: {
+                type: 'integer',
+                description: 'Access token expiry timestamp',
+              },
+              refreshTokenExpiry: {
+                type: 'integer',
+                description: 'Refresh token expiry timestamp',
+              },
+              tokenId: {
+                type: 'string',
+                description: 'Token ID for tracking and revocation',
+              },
+            },
+            required: [
+              'accessToken',
+              'refreshToken',
+              'accessTokenExpiry',
+              'refreshTokenExpiry',
+              'tokenId',
+            ],
           },
           user: {
             $ref: '#/components/schemas/User',
           },
         },
-        required: ['accessToken', 'refreshToken', 'user'],
+        required: ['tokens', 'user'],
+      },
+      TOTPSetup: {
+        type: 'object',
+        properties: {
+          secret: {
+            type: 'string',
+            description: 'TOTP secret for manual entry',
+          },
+          qrCode: {
+            type: 'string',
+            description: 'QR code data URL for authenticator apps',
+          },
+          manualEntryKey: {
+            type: 'string',
+            description: 'Manual entry key for authenticator apps',
+          },
+          message: {
+            type: 'string',
+            description: 'Instructions for setup',
+          },
+        },
+        required: ['secret', 'qrCode', 'manualEntryKey', 'message'],
       },
       ApiToken: {
         type: 'object',

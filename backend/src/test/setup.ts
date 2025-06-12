@@ -42,7 +42,7 @@ beforeAll(async () => {
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'info').mockImplementation(() => {});
   jest.spyOn(console, 'warn').mockImplementation(() => {});
-  
+
   // Only allow console.error to show critical issues
   const originalError = console.error;
   jest.spyOn(console, 'error').mockImplementation((...args) => {

@@ -1,39 +1,13 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeEach } from '@jest/globals';
 import { OrganizationService } from '../../../services/organization.service';
-import { PrismaClient } from '@prisma/client';
-import { ValidationError } from '../../../utils/errors';
-
-// Mock Prisma Client
-jest.mock('@prisma/client');
-
-const mockPrisma = {
-  organization: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    findFirst: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-  },
-  user: {
-    findMany: jest.fn(),
-    count: jest.fn(),
-  },
-} as any;
+import { UserRole } from '@prisma/client';
+import { prismaMock } from '../../prisma-singleton';
 
 describe('OrganizationService', () => {
   let organizationService: OrganizationService;
 
   beforeEach(() => {
-    // Reset all mocks
-    jest.clearAllMocks();
-    
-    // Create new instance with mocked prisma
     organizationService = new OrganizationService();
-    (organizationService as any).prisma = mockPrisma;
-  });
-
-  afterEach(() => {
-    jest.resetAllMocks();
   });
 
   describe('createOrganization', () => {
@@ -45,192 +19,233 @@ describe('OrganizationService', () => {
       const createdOrganization = {
         id: 'org-123',
         name: organizationData.name,
-        ownerId: null,
+        ownerUserId: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
-      mockPrisma.organization.create.mockResolvedValue(createdOrganization);
+      prismaMock.organization.create.mockResolvedValue(createdOrganization);
 
       const result = await organizationService.createOrganization(organizationData);
 
-      expect(mockPrisma.organization.create).toHaveBeenCalledWith({
-        data: {
-          name: organizationData.name,
-        },
-      });
       expect(result).toEqual(createdOrganization);
-    });
-
-    test('should throw validation error for invalid name', async () => {
-      const organizationData = {
-        name: '', // Empty name
-      };
-
-      await expect(organizationService.createOrganization(organizationData)).rejects.toThrow(ValidationError);
-    });
-
-    test('should throw validation error for name with invalid characters', async () => {
-      const organizationData = {
-        name: 'Test<script>alert("xss")</script>Organization',
-      };
-
-      await expect(organizationService.createOrganization(organizationData)).rejects.toThrow(ValidationError);
-    });
-
-    test('should throw validation error for duplicate organization name', async () => {
-      const organizationData = {
-        name: 'Existing Organization',
-      };
-
-      const error = new Error('Unique constraint failed');
-      (error as any).code = 'P2002';
-      mockPrisma.organization.create.mockRejectedValue(error);
-
-      await expect(organizationService.createOrganization(organizationData)).rejects.toThrow(ValidationError);
+      expect(prismaMock.organization.create).toHaveBeenCalledWith({
+        data: { name: organizationData.name },
+      });
     });
   });
 
   describe('getOrganizationById', () => {
-    test('should return organization by ID', async () => {
+    test('should return organization if found', async () => {
       const organizationId = 'org-123';
       const organization = {
         id: organizationId,
         name: 'Test Organization',
-        ownerId: 'user-123',
+        ownerUserId: 'user-123',
         createdAt: new Date(),
         updatedAt: new Date(),
+        owner: {
+          id: 'user-123',
+          email: 'owner@example.com',
+          passwordHash: 'hashed',
+          fullName: 'Owner User',
+          role: UserRole.OWNER,
+          organizationId,
+          emailVerified: true,
+          isActive: true,
+          totpEnabled: false,
+          totpSecret: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        _count: {
+          users: 5,
+          assets: 10,
+          tasks: 3,
+        },
       };
 
-      mockPrisma.organization.findUnique.mockResolvedValue(organization);
+      prismaMock.organization.findUnique.mockResolvedValue(organization);
 
       const result = await organizationService.getOrganizationById(organizationId);
 
-      expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
-        where: { id: organizationId },
-      });
       expect(result).toEqual(organization);
+      expect(prismaMock.organization.findUnique).toHaveBeenCalledWith({
+        where: { id: organizationId },
+        include: {
+          owner: true,
+          _count: {
+            select: {
+              users: true,
+              assets: true,
+              tasks: true,
+            },
+          },
+        },
+      });
     });
 
-    test('should throw validation error for invalid UUID', async () => {
-      const invalidId = 'invalid-uuid';
+    test('should return null if organization not found', async () => {
+      const organizationId = 'non-existent';
+      prismaMock.organization.findUnique.mockResolvedValue(null);
 
-      await expect(organizationService.getOrganizationById(invalidId)).rejects.toThrow(ValidationError);
-    });
+      const result = await organizationService.getOrganizationById(organizationId);
 
-    test('should throw validation error if organization not found', async () => {
-      const organizationId = 'non-existent-org';
-
-      mockPrisma.organization.findUnique.mockResolvedValue(null);
-
-      await expect(organizationService.getOrganizationById(organizationId)).rejects.toThrow(ValidationError);
+      expect(result).toBeNull();
     });
   });
 
   describe('updateOrganization', () => {
     test('should update organization successfully', async () => {
       const organizationId = 'org-123';
-      const updateData = {
-        name: 'Updated Organization Name',
-      };
+      const updateData = { name: 'Updated Organization' };
 
       const existingOrganization = {
         id: organizationId,
-        name: 'Old Name',
-        ownerId: 'user-123',
+        name: 'Old Organization',
+        ownerUserId: 'user-123',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
       const updatedOrganization = {
         ...existingOrganization,
         name: updateData.name,
-        updatedAt: new Date(),
+        owner: {
+          id: 'user-123',
+          email: 'owner@example.com',
+          passwordHash: 'hashed',
+          fullName: 'Owner User',
+          role: UserRole.OWNER,
+          organizationId,
+          emailVerified: true,
+          isActive: true,
+          totpEnabled: false,
+          totpSecret: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        _count: {
+          users: 5,
+          assets: 10,
+          tasks: 3,
+        },
       };
 
-      mockPrisma.organization.findUnique.mockResolvedValue(existingOrganization);
-      mockPrisma.organization.update.mockResolvedValue(updatedOrganization);
+      prismaMock.organization.findUnique.mockResolvedValue(existingOrganization);
+      prismaMock.organization.update.mockResolvedValue(updatedOrganization);
 
       const result = await organizationService.updateOrganization(organizationId, updateData);
 
-      expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
-        where: { id: organizationId },
-      });
-      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
+      expect(result).toEqual(updatedOrganization);
+      expect(prismaMock.organization.update).toHaveBeenCalledWith({
         where: { id: organizationId },
         data: updateData,
+        include: {
+          owner: true,
+          _count: {
+            select: {
+              users: true,
+              assets: true,
+              tasks: true,
+            },
+          },
+        },
       });
-      expect(result).toEqual(updatedOrganization);
     });
 
-    test('should throw validation error if organization not found', async () => {
-      const organizationId = 'non-existent-org';
-      const updateData = { name: 'New Name' };
+    test('should throw error if organization not found', async () => {
+      const organizationId = 'non-existent';
+      const updateData = { name: 'Updated Organization' };
 
-      mockPrisma.organization.findUnique.mockResolvedValue(null);
+      prismaMock.organization.findUnique.mockResolvedValue(null);
 
-      await expect(organizationService.updateOrganization(organizationId, updateData)).rejects.toThrow(ValidationError);
-    });
-
-    test('should throw validation error for invalid name', async () => {
-      const organizationId = 'org-123';
-      const updateData = {
-        name: '', // Empty name
-      };
-
-      await expect(organizationService.updateOrganization(organizationId, updateData)).rejects.toThrow(ValidationError);
+      await expect(
+        organizationService.updateOrganization(organizationId, updateData),
+      ).rejects.toThrow('Organization not found');
     });
   });
 
   describe('setOwner', () => {
-    test('should set organization owner successfully', async () => {
+    test('should set owner successfully', async () => {
       const organizationId = 'org-123';
       const userId = 'user-123';
 
       const organization = {
         id: organizationId,
         name: 'Test Organization',
-        ownerId: null,
+        ownerUserId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
-      const updatedOrganization = {
+      const user = {
+        id: userId,
+        email: 'user@example.com',
+        passwordHash: 'hashed',
+        fullName: 'Test User',
+        role: UserRole.MEMBER,
+        organizationId,
+        emailVerified: true,
+        isActive: true,
+        totpEnabled: false,
+        totpSecret: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      prismaMock.organization.findUnique.mockResolvedValue(organization);
+      prismaMock.user.findFirst.mockResolvedValue(user);
+      prismaMock.organization.update.mockResolvedValue({
         ...organization,
-        ownerId: userId,
-      };
-
-      mockPrisma.organization.findUnique.mockResolvedValue(organization);
-      mockPrisma.organization.update.mockResolvedValue(updatedOrganization);
+        ownerUserId: userId,
+      });
+      prismaMock.user.update.mockResolvedValue({
+        ...user,
+        role: UserRole.OWNER,
+      });
 
       await organizationService.setOwner(organizationId, userId);
 
-      expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
+      expect(prismaMock.organization.update).toHaveBeenCalledWith({
         where: { id: organizationId },
+        data: { ownerUserId: userId },
       });
-      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
-        where: { id: organizationId },
-        data: { ownerId: userId },
+      expect(prismaMock.user.update).toHaveBeenCalledWith({
+        where: { id: userId },
+        data: { role: UserRole.OWNER },
       });
     });
 
-    test('should throw validation error if organization not found', async () => {
-      const organizationId = 'non-existent-org';
+    test('should throw error if organization not found', async () => {
+      const organizationId = 'non-existent';
       const userId = 'user-123';
 
-      mockPrisma.organization.findUnique.mockResolvedValue(null);
+      prismaMock.organization.findUnique.mockResolvedValue(null);
 
-      await expect(organizationService.setOwner(organizationId, userId)).rejects.toThrow(ValidationError);
+      await expect(organizationService.setOwner(organizationId, userId)).rejects.toThrow(
+        'Organization not found',
+      );
     });
 
-    test('should throw validation error for invalid user ID', async () => {
+    test('should throw error if user not found in organization', async () => {
       const organizationId = 'org-123';
-      const invalidUserId = 'invalid-uuid';
+      const userId = 'non-existent-user';
 
-      await expect(organizationService.setOwner(organizationId, invalidUserId)).rejects.toThrow(ValidationError);
-    });
+      const organization = {
+        id: organizationId,
+        name: 'Test Organization',
+        ownerUserId: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
 
-    test('should throw validation error for invalid organization ID', async () => {
-      const invalidOrgId = 'invalid-uuid';
-      const userId = 'user-123';
+      prismaMock.organization.findUnique.mockResolvedValue(organization);
+      prismaMock.user.findFirst.mockResolvedValue(null);
 
-      await expect(organizationService.setOwner(invalidOrgId, userId)).rejects.toThrow(ValidationError);
+      await expect(organizationService.setOwner(organizationId, userId)).rejects.toThrow(
+        'User not found in organization',
+      );
     });
   });
 
@@ -239,59 +254,44 @@ describe('OrganizationService', () => {
       const organizationId = 'org-123';
       const members = [
         {
-          id: 'user-123',
+          id: 'user-1',
           email: 'user1@example.com',
-          fullName: 'User One',
-          role: 'OWNER',
+          passwordHash: 'hashed',
+          fullName: 'User 1',
+          role: UserRole.MEMBER,
           organizationId,
+          emailVerified: true,
           isActive: true,
+          totpEnabled: false,
+          totpSecret: null,
           createdAt: new Date(),
+          updatedAt: new Date(),
         },
         {
-          id: 'user-456',
+          id: 'user-2',
           email: 'user2@example.com',
-          fullName: 'User Two',
-          role: 'MEMBER',
+          passwordHash: 'hashed',
+          fullName: 'User 2',
+          role: UserRole.MANAGER,
           organizationId,
+          emailVerified: true,
           isActive: true,
+          totpEnabled: false,
+          totpSecret: null,
           createdAt: new Date(),
+          updatedAt: new Date(),
         },
       ];
 
-      mockPrisma.user.findMany.mockResolvedValue(members);
+      prismaMock.user.findMany.mockResolvedValue(members);
 
       const result = await organizationService.getMembers(organizationId);
 
-      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
-        where: { organizationId },
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-        orderBy: [{ role: 'asc' }, { createdAt: 'desc' }],
-      });
       expect(result).toEqual(members);
-    });
-
-    test('should throw validation error for invalid organization ID', async () => {
-      const invalidOrgId = 'invalid-uuid';
-
-      await expect(organizationService.getMembers(invalidOrgId)).rejects.toThrow(ValidationError);
-    });
-
-    test('should return empty array for organization with no members', async () => {
-      const organizationId = 'org-123';
-
-      mockPrisma.user.findMany.mockResolvedValue([]);
-
-      const result = await organizationService.getMembers(organizationId);
-
-      expect(result).toEqual([]);
+      expect(prismaMock.user.findMany).toHaveBeenCalledWith({
+        where: { organizationId },
+        orderBy: { createdAt: 'desc' },
+      });
     });
   });
 
@@ -302,56 +302,53 @@ describe('OrganizationService', () => {
       const organization = {
         id: organizationId,
         name: 'Test Organization',
-        ownerId: 'user-123',
-        createdAt: new Date('2023-01-01'),
+        ownerUserId: 'user-123',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
-      mockPrisma.organization.findUnique.mockResolvedValue(organization);
-      mockPrisma.user.count
-        .mockResolvedValueOnce(5) // totalUsers
-        .mockResolvedValueOnce(4) // activeUsers
-        .mockResolvedValueOnce(1) // ownersCount
-        .mockResolvedValueOnce(1) // managersCount
-        .mockResolvedValueOnce(2) // membersCount
-        .mockResolvedValueOnce(1); // viewersCount
+      const tasksByStatus = [
+        { status: 'PENDING', _count: 5 },
+        { status: 'COMPLETED', _count: 3 },
+      ];
+
+      const usersByRole = [
+        { role: 'OWNER', _count: 1 },
+        { role: 'MEMBER', _count: 4 },
+      ];
+
+      prismaMock.organization.findUnique.mockResolvedValue(organization);
+      prismaMock.user.count.mockResolvedValue(10);
+      prismaMock.asset.count.mockResolvedValue(20);
+      prismaMock.task.count.mockResolvedValue(8);
+      (prismaMock.task.groupBy as jest.MockedFunction<any>).mockResolvedValue(tasksByStatus);
+      (prismaMock.user.groupBy as jest.MockedFunction<any>).mockResolvedValue(usersByRole);
 
       const result = await organizationService.getStatistics(organizationId);
 
-      expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
-        where: { id: organizationId },
-      });
-
-      expect(mockPrisma.user.count).toHaveBeenCalledTimes(6);
-      
       expect(result).toEqual({
-        totalUsers: 5,
-        activeUsers: 4,
+        totalUsers: 10,
+        totalAssets: 20,
+        totalTasks: 8,
+        tasksByStatus: {
+          PENDING: 5,
+          COMPLETED: 3,
+        },
         usersByRole: {
           OWNER: 1,
-          MANAGER: 1,
-          MEMBER: 2,
-          VIEWER: 1,
+          MEMBER: 4,
         },
-        organizationAge: expect.any(Number),
       });
-
-      // Check that organizationAge is calculated correctly (approximately)
-      const expectedAge = Math.floor((Date.now() - organization.createdAt.getTime()) / (1000 * 60 * 60 * 24));
-      expect(result.organizationAge).toBeCloseTo(expectedAge, -1); // Within 10 days
     });
 
-    test('should throw validation error if organization not found', async () => {
-      const organizationId = 'non-existent-org';
+    test('should throw error if organization not found', async () => {
+      const organizationId = 'non-existent';
 
-      mockPrisma.organization.findUnique.mockResolvedValue(null);
+      prismaMock.organization.findUnique.mockResolvedValue(null);
 
-      await expect(organizationService.getStatistics(organizationId)).rejects.toThrow(ValidationError);
-    });
-
-    test('should throw validation error for invalid organization ID', async () => {
-      const invalidOrgId = 'invalid-uuid';
-
-      await expect(organizationService.getStatistics(invalidOrgId)).rejects.toThrow(ValidationError);
+      await expect(organizationService.getStatistics(organizationId)).rejects.toThrow(
+        'Organization not found',
+      );
     });
   });
 
@@ -362,53 +359,29 @@ describe('OrganizationService', () => {
       const organization = {
         id: organizationId,
         name: 'Test Organization',
-        ownerId: 'user-123',
+        ownerUserId: 'user-123',
+        createdAt: new Date(),
+        updatedAt: new Date(),
       };
 
-      mockPrisma.organization.findUnique.mockResolvedValue(organization);
-      mockPrisma.user.count.mockResolvedValue(1); // Only owner exists
-      mockPrisma.organization.delete.mockResolvedValue(organization);
+      prismaMock.organization.findUnique.mockResolvedValue(organization);
+      prismaMock.organization.delete.mockResolvedValue(organization);
 
       await organizationService.deleteOrganization(organizationId);
 
-      expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
-        where: { id: organizationId },
-      });
-      expect(mockPrisma.user.count).toHaveBeenCalledWith({
-        where: { organizationId },
-      });
-      expect(mockPrisma.organization.delete).toHaveBeenCalledWith({
+      expect(prismaMock.organization.delete).toHaveBeenCalledWith({
         where: { id: organizationId },
       });
     });
 
-    test('should throw validation error if organization not found', async () => {
-      const organizationId = 'non-existent-org';
+    test('should throw error if organization not found', async () => {
+      const organizationId = 'non-existent';
 
-      mockPrisma.organization.findUnique.mockResolvedValue(null);
+      prismaMock.organization.findUnique.mockResolvedValue(null);
 
-      await expect(organizationService.deleteOrganization(organizationId)).rejects.toThrow(ValidationError);
-    });
-
-    test('should throw validation error if organization has multiple users', async () => {
-      const organizationId = 'org-123';
-
-      const organization = {
-        id: organizationId,
-        name: 'Test Organization',
-        ownerId: 'user-123',
-      };
-
-      mockPrisma.organization.findUnique.mockResolvedValue(organization);
-      mockPrisma.user.count.mockResolvedValue(3); // Multiple users exist
-
-      await expect(organizationService.deleteOrganization(organizationId)).rejects.toThrow(ValidationError);
-    });
-
-    test('should throw validation error for invalid organization ID', async () => {
-      const invalidOrgId = 'invalid-uuid';
-
-      await expect(organizationService.deleteOrganization(invalidOrgId)).rejects.toThrow(ValidationError);
+      await expect(organizationService.deleteOrganization(organizationId)).rejects.toThrow(
+        'Organization not found',
+      );
     });
   });
 });

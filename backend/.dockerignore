@@ -1,84 +1,54 @@
-# Dependency directories
+# Dependencies
 node_modules/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Build output (we build inside Docker)
+# Build output
 dist/
+build/
+*.tsbuildinfo
 
-# Test and coverage files
+# Test files
 coverage/
-test-results/
 .nyc_output/
 *.test.ts
 *.spec.ts
 __tests__/
-src/test/
+test/
 
-# Environment files
-.env*
-!.env.example
-.npmrc
+# Development files
+.env
+.env.local
+.env.*.local
+*.log
 
-# IDE and editor files
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS generated files
+# OS files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
-# Git and CI/CD
+# Git
 .git/
 .gitignore
-.github/
-
-# Docker files
-Dockerfile*
-docker-compose*.yml
-.dockerignore
 
 # Documentation
 README.md
+CHANGELOG.md
 docs/
-*.md
 
-# Configuration files we don't need in container
-.eslintrc*
-.prettierrc*
-jest.config.*
-tsconfig.json
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
 
-# Logs
-logs/
-*.log
-
-# Runtime data
-pids/
-*.pid
-*.seed
-
-# Temporary folders
+# Temporary files
 tmp/
 temp/
-
-# Build artifacts
-.cache/
-
-# Local database files
-*.db
-*.sqlite
-
-# AWS and cloud configs
-.aws/
-.gcp/
-
-# Other development files
-.husky/
+*.tmp

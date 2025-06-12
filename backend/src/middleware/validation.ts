@@ -14,14 +14,17 @@ export function validateRequest(schema: {
   return (req: Request, _res: Response, next: NextFunction): void => {
     try {
       if (schema.body) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         req.body = schema.body.parse(req.body);
       }
 
       if (schema.query) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         req.query = schema.query.parse(req.query);
       }
 
       if (schema.params) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         req.params = schema.params.parse(req.params);
       }
 

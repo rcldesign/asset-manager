@@ -5,22 +5,14 @@ declare global {
   var prisma: PrismaClient | undefined;
 }
 
-const globalForPrisma = globalThis as {
-  prisma: PrismaClient | undefined;
-};
-
 export const prisma =
-  globalForPrisma.prisma ??
+  global.prisma ||
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 
 if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma;
+  global.prisma = prisma;
 }
 
-// Graceful shutdown
-// eslint-disable-next-line @typescript-eslint/no-misused-promises
-process.on('beforeExit', async () => {
-  await prisma.$disconnect();
-});
+export default prisma;

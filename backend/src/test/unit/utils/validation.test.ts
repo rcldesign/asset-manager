@@ -1,5 +1,10 @@
 import { describe, test, expect } from '@jest/globals';
-import { commonSchemas, authSchemas, userSchemas, organizationSchemas } from '../../../middleware/validation';
+import {
+  commonSchemas,
+  authSchemas,
+  userSchemas,
+  organizationSchemas,
+} from '../../../middleware/validation';
 
 describe('Validation Schemas', () => {
   describe('commonSchemas', () => {
@@ -11,7 +16,7 @@ describe('Validation Schemas', () => {
           'user123@test-domain.org',
         ];
 
-        validEmails.forEach(email => {
+        validEmails.forEach((email) => {
           const result = commonSchemas.email.safeParse(email);
           expect(result.success).toBe(true);
         });
@@ -26,7 +31,7 @@ describe('Validation Schemas', () => {
           'user..name@example.com',
         ];
 
-        invalidEmails.forEach(email => {
+        invalidEmails.forEach((email) => {
           const result = commonSchemas.email.safeParse(email);
           expect(result.success).toBe(false);
         });
@@ -41,13 +46,9 @@ describe('Validation Schemas', () => {
 
     describe('password validation', () => {
       test('should validate strong passwords', () => {
-        const validPasswords = [
-          'TestPassword123!',
-          'MyStr0ng!Pass',
-          'C0mplex&Secure9',
-        ];
+        const validPasswords = ['TestPassword123!', 'MyStr0ng!Pass', 'C0mplex&Secure9'];
 
-        validPasswords.forEach(password => {
+        validPasswords.forEach((password) => {
           const result = commonSchemas.password.safeParse(password);
           expect(result.success).toBe(true);
         });
@@ -63,7 +64,7 @@ describe('Validation Schemas', () => {
           'password123!', // No uppercase
         ];
 
-        weakPasswords.forEach(password => {
+        weakPasswords.forEach((password) => {
           const result = commonSchemas.password.safeParse(password);
           expect(result.success).toBe(false);
         });
@@ -84,7 +85,7 @@ describe('Validation Schemas', () => {
           '6ba7b810-9dad-11d1-80b4-00c04fd430c8',
         ];
 
-        validUUIDs.forEach(uuid => {
+        validUUIDs.forEach((uuid) => {
           const result = commonSchemas.id.safeParse(uuid);
           expect(result.success).toBe(true);
         });
@@ -98,7 +99,7 @@ describe('Validation Schemas', () => {
           '123e4567-e89b-12d3-a456-426614174000-extra',
         ];
 
-        invalidUUIDs.forEach(uuid => {
+        invalidUUIDs.forEach((uuid) => {
           const result = commonSchemas.id.safeParse(uuid);
           expect(result.success).toBe(false);
         });
@@ -107,28 +108,18 @@ describe('Validation Schemas', () => {
 
     describe('name validation', () => {
       test('should validate correct names', () => {
-        const validNames = [
-          'Test Name',
-          'User123',
-          'Project-Name',
-          'File_Name.txt',
-        ];
+        const validNames = ['Test Name', 'User123', 'Project-Name', 'File_Name.txt'];
 
-        validNames.forEach(name => {
+        validNames.forEach((name) => {
           const result = commonSchemas.name.safeParse(name);
           expect(result.success).toBe(true);
         });
       });
 
       test('should reject names with invalid characters', () => {
-        const invalidNames = [
-          'Name<script>',
-          'Name@#$%',
-          'Name!@#',
-          'Name&amp;',
-        ];
+        const invalidNames = ['Name<script>', 'Name@#$%', 'Name!@#', 'Name&amp;'];
 
-        invalidNames.forEach(name => {
+        invalidNames.forEach((name) => {
           const result = commonSchemas.name.safeParse(name);
           expect(result.success).toBe(false);
         });
@@ -142,13 +133,9 @@ describe('Validation Schemas', () => {
 
     describe('TOTP token validation', () => {
       test('should validate correct TOTP tokens', () => {
-        const validTokens = [
-          '123456',
-          '000000',
-          '999999',
-        ];
+        const validTokens = ['123456', '000000', '999999'];
 
-        validTokens.forEach(token => {
+        validTokens.forEach((token) => {
           const result = commonSchemas.totpToken.safeParse(token);
           expect(result.success).toBe(true);
         });
@@ -162,7 +149,7 @@ describe('Validation Schemas', () => {
           '12345a', // Mixed characters
         ];
 
-        invalidTokens.forEach(token => {
+        invalidTokens.forEach((token) => {
           const result = commonSchemas.totpToken.safeParse(token);
           expect(result.success).toBe(false);
         });

@@ -1,6 +1,11 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
+/**
+ * Configuration module for the DumbAssets Enhanced application
+ * Loads and validates environment variables using Zod schemas
+ */
+
 // Load environment variables
 dotenv.config();
 
@@ -91,10 +96,16 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
 });
 
-// Parse and validate environment variables
+/**
+ * Parse and validate environment variables against the schema
+ * @throws {ZodError} When required environment variables are missing or invalid
+ */
 const env = envSchema.parse(process.env);
 
-// Export configuration object
+/**
+ * Application configuration object
+ * Contains all validated and processed configuration values
+ */
 export const config = {
   env: env.NODE_ENV,
   port: env.PORT,
@@ -173,5 +184,8 @@ export const config = {
   },
 };
 
-// Type export for use in other modules
+/**
+ * TypeScript type definition for the configuration object
+ * Use this type for dependency injection and type safety
+ */
 export type Config = typeof config;

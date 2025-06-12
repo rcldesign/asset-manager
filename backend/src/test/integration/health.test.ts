@@ -12,14 +12,12 @@ describe('Health Check Integration Tests', () => {
 
   describe('GET /health', () => {
     test('should return health status', async () => {
-      const response = await request(app)
-        .get('/health')
-        .expect(200);
+      const response = await request(app).get('/health').expect(200);
 
       expect(response.body).toHaveProperty('status', 'ok');
       expect(response.body).toHaveProperty('timestamp');
       expect(typeof response.body.timestamp).toBe('string');
-      
+
       // Verify timestamp is a valid ISO string
       const timestamp = new Date(response.body.timestamp);
       expect(timestamp instanceof Date).toBe(true);
@@ -27,17 +25,13 @@ describe('Health Check Integration Tests', () => {
     });
 
     test('should return JSON content type', async () => {
-      const response = await request(app)
-        .get('/health')
-        .expect('Content-Type', /json/);
+      const response = await request(app).get('/health').expect('Content-Type', /json/);
 
       expect(response.body).toHaveProperty('status');
     });
 
     test('should be accessible without authentication', async () => {
-      const response = await request(app)
-        .get('/health')
-        .expect(200);
+      const response = await request(app).get('/health').expect(200);
 
       expect(response.body.status).toBe('ok');
     });
@@ -45,18 +39,14 @@ describe('Health Check Integration Tests', () => {
 
   describe('404 Handler', () => {
     test('should return 404 for non-existent routes', async () => {
-      const response = await request(app)
-        .get('/non-existent-route')
-        .expect(404);
+      const response = await request(app).get('/non-existent-route').expect(404);
 
       expect(response.body).toHaveProperty('error');
       expect(response.body.error).toContain('Route GET /non-existent-route not found');
     });
 
     test('should return 404 for non-existent API routes', async () => {
-      const response = await request(app)
-        .get('/api/non-existent')
-        .expect(404);
+      const response = await request(app).get('/api/non-existent').expect(404);
 
       expect(response.body).toHaveProperty('error');
       expect(response.body.error).toContain('Route GET /api/non-existent not found');

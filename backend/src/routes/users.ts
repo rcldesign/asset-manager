@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import type { z } from 'zod';
 import { UserService } from '../services/user.service';
 import { ValidationError } from '../utils/errors';
 import {
@@ -8,6 +9,11 @@ import {
   type AuthenticatedRequest,
 } from '../middleware/auth';
 import { validateRequest, userSchemas } from '../middleware/validation';
+
+// Type definitions for validated request bodies
+type UserCreateBody = z.infer<typeof userSchemas.create>;
+type UserUpdateBody = z.infer<typeof userSchemas.update>;
+type UserParamsBody = z.infer<typeof userSchemas.params>;
 
 const router = Router();
 const userService = new UserService();
@@ -71,7 +77,7 @@ router.get(
   validateRequest({ params: userSchemas.params }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { userId } = req.params as { userId: string };
+      const { userId } = req.params as UserParamsBody;
 
       const user = await userService.getUserById(userId);
 
@@ -107,15 +113,10 @@ router.put(
   }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const authenticatedReq = req as AuthenticatedRequest;
-      const { userId } = req.params as { userId: string };
-      const { email, fullName, role, isActive } = req.body;
+      const { userId } = req.params as UserParamsBody;
+      const { email, fullName, role, isActive } = req.body as UserUpdateBody;
 
-      const user = await userService.updateUser(
-        userId,
-        { email, fullName, role, isActive },
-        authenticatedReq.user.id,
-      );
+      const user = await userService.updateUser(userId, { email, fullName, role, isActive });
 
       res.json(user);
     } catch (error) {
@@ -132,7 +133,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authenticatedReq = req as AuthenticatedRequest;
-      const { email, password, fullName, role } = req.body;
+      const { email, password, fullName, role } = req.body as UserCreateBody;
 
       const user = await userService.createUser({
         email,
@@ -167,10 +168,9 @@ router.delete(
   validateRequest({ params: userSchemas.params }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const authenticatedReq = req as AuthenticatedRequest;
-      const { userId } = req.params as { userId: string };
+      const { userId } = req.params as UserParamsBody;
 
-      await userService.deleteUser(userId, authenticatedReq.user.id);
+      await userService.deleteUser(userId);
 
       res.json({ message: 'User deleted successfully' });
     } catch (error) {

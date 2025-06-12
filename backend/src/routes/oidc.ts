@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import type { z } from 'zod';
 import { oidcService } from '../services/oidc.service';
 import { UserService } from '../services/user.service';
 import { OrganizationService } from '../services/organization.service';
@@ -7,6 +8,12 @@ import { ValidationError, ConfigurationError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { validateRequest, oidcSchemas } from '../middleware/validation';
 import crypto from 'crypto';
+
+// Type definitions for validated request bodies
+type OidcLoginBody = z.infer<typeof oidcSchemas.login>;
+type OidcCallbackQuery = z.infer<typeof oidcSchemas.callback>;
+type OidcRefreshTokenBody = z.infer<typeof oidcSchemas.refreshTokens>;
+type OidcLogoutBody = z.infer<typeof oidcSchemas.logout>;
 
 const router = Router();
 const userService = new UserService();
@@ -67,7 +74,7 @@ router.post(
         throw new ConfigurationError('OIDC authentication is not available');
       }
 
-      const { organizationName } = req.body;
+      const { organizationName } = req.body as OidcLoginBody;
 
       // Generate secure random values
       const state = crypto.randomBytes(32).toString('base64url');
@@ -110,11 +117,7 @@ router.get(
         throw new ConfigurationError('OIDC authentication is not available');
       }
 
-      const {
-        code,
-        state,
-        error: oidcError,
-      } = req.query as { code: string; state: string; error?: string };
+      const { code, state, error: oidcError } = req.query as OidcCallbackQuery;
 
       // Check for OIDC errors
       if (oidcError) {
@@ -265,7 +268,7 @@ router.post(
         throw new ConfigurationError('OIDC authentication is not available');
       }
 
-      const { refreshToken } = req.body;
+      const { refreshToken } = req.body as OidcRefreshTokenBody;
 
       // Refresh tokens with OIDC provider
       const newTokens = await oidcService.refreshTokens(refreshToken);
@@ -295,7 +298,7 @@ router.post(
         throw new ConfigurationError('OIDC authentication is not available');
       }
 
-      const { idToken, postLogoutRedirectUri } = req.body;
+      const { idToken, postLogoutRedirectUri } = req.body as OidcLogoutBody;
 
       const logoutUrl = oidcService.generateLogoutUrl(idToken, postLogoutRedirectUri);
 

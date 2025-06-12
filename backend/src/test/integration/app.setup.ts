@@ -1,6 +1,25 @@
 import express, { type Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+
+// Mock OIDC service before importing routes
+jest.mock('../../services/oidc.service', () => ({
+  OIDCService: {
+    getInstance: jest.fn().mockReturnValue({
+      getAuthorizationUrl: jest.fn().mockResolvedValue('https://mock-auth-url.com'),
+      exchangeCodeForTokens: jest.fn().mockResolvedValue({
+        access_token: 'mock-access-token',
+        id_token: 'mock-id-token',
+      }),
+      getUserInfo: jest.fn().mockResolvedValue({
+        sub: 'mock-user-id',
+        email: 'mock@example.com',
+        name: 'Mock User',
+      }),
+    }),
+  },
+}));
+
 import authRoutes from '../../routes/auth';
 import userRoutes from '../../routes/users';
 import organizationRoutes from '../../routes/organizations';
@@ -45,10 +64,10 @@ export function createTestApp(): Application {
  */
 export async function setupTestDatabase(): Promise<TestDatabaseHelper> {
   const dbHelper = new TestDatabaseHelper();
-  
+
   await dbHelper.connect();
   await dbHelper.clearDatabase();
-  
+
   return dbHelper;
 }
 
@@ -66,31 +85,31 @@ export async function cleanupTestDatabase(dbHelper: TestDatabaseHelper): Promise
 export function setupTestEnvironment(): void {
   // Ensure test environment
   process.env.NODE_ENV = 'test';
-  
+
   // Database configuration
   process.env.DATABASE_URL = 'file:./test.db';
   process.env.USE_EMBEDDED_DB = 'false';
-  
+
   // JWT secrets
   process.env.JWT_SECRET = 'test-jwt-secret-32-characters-long';
   process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-32-characters-long';
   process.env.ENCRYPTION_KEY = 'test-32-byte-encryption-key-for-testing';
   process.env.SESSION_SECRET = 'test-session-secret-32-characters-long';
-  
+
   // Redis configuration
   process.env.REDIS_URL = 'redis://localhost:6379/1';
   process.env.USE_EMBEDDED_REDIS = 'false';
-  
+
   // Disable OIDC for most tests
   process.env.OIDC_ISSUER_URL = '';
   process.env.OIDC_CLIENT_ID = '';
   process.env.OIDC_CLIENT_SECRET = '';
   process.env.OIDC_REDIRECT_URI = '';
-  
+
   // Logging configuration
   process.env.LOG_LEVEL = 'error';
   process.env.ENABLE_METRICS = 'false';
-  
+
   // File upload configuration
   process.env.UPLOAD_DIR = './test-uploads';
   process.env.MAX_FILE_SIZE = '10485760'; // 10MB
@@ -106,21 +125,21 @@ export const testDataGenerators = {
     fullName: 'Test User',
     organizationName: `Test Organization ${Date.now()}`,
   }),
-  
+
   validOrganization: () => ({
     name: `Test Organization ${Date.now()}`,
   }),
-  
+
   validLogin: (email: string) => ({
     email,
     password: 'TestPassword123!',
   }),
-  
+
   validPasswordChange: () => ({
     currentPassword: 'TestPassword123!',
     newPassword: 'NewTestPassword456!',
   }),
-  
+
   validApiToken: () => ({
     name: `Test Token ${Date.now()}`,
   }),
@@ -140,23 +159,30 @@ export const integrationAssertions = {
     expect(user).not.toHaveProperty('passwordHash');
     expect(user).not.toHaveProperty('totpSecret');
   },
-  
+
   expectValidOrganization: (organization: any) => {
     expect(organization).toHaveProperty('id');
     expect(organization).toHaveProperty('name');
     expect(organization).toHaveProperty('createdAt');
     expect(organization).toHaveProperty('updatedAt');
   },
-  
+
   expectValidTokens: (tokens: any) => {
     expect(tokens).toHaveProperty('accessToken');
     expect(tokens).toHaveProperty('refreshToken');
+    expect(tokens).toHaveProperty('accessTokenExpiry');
+    expect(tokens).toHaveProperty('refreshTokenExpiry');
+    expect(tokens).toHaveProperty('tokenId');
     expect(typeof tokens.accessToken).toBe('string');
     expect(typeof tokens.refreshToken).toBe('string');
+    expect(typeof tokens.accessTokenExpiry).toBe('number');
+    expect(typeof tokens.refreshTokenExpiry).toBe('number');
+    expect(typeof tokens.tokenId).toBe('string');
     expect(tokens.accessToken.length).toBeGreaterThan(10);
     expect(tokens.refreshToken.length).toBeGreaterThan(10);
+    expect(tokens.tokenId.length).toBeGreaterThan(10);
   },
-  
+
   expectValidApiToken: (apiToken: any) => {
     expect(apiToken).toHaveProperty('id');
     expect(apiToken).toHaveProperty('name');
@@ -165,13 +191,13 @@ export const integrationAssertions = {
     expect(typeof apiToken.token).toBe('string');
     expect(apiToken.token.length).toBeGreaterThan(10);
   },
-  
+
   expectErrorResponse: (response: any, statusCode: number) => {
     expect(response.status).toBe(statusCode);
     expect(response.body).toHaveProperty('error');
     expect(typeof response.body.error).toBe('string');
   },
-  
+
   expectSuccessResponse: (response: any, statusCode: number = 200) => {
     expect(response.status).toBe(statusCode);
     expect(response.body).not.toHaveProperty('error');

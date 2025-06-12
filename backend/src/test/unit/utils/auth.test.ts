@@ -1,20 +1,41 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { generateTokens, verifyAccessToken, verifyRefreshToken, generateQRCode } from '../../../utils/auth';
-import jwt from 'jsonwebtoken';
-import QRCode from 'qrcode';
+import {
+  generateTokens,
+  verifyAccessToken,
+  verifyRefreshToken,
+  generateQRCode,
+} from '../../../utils/auth';
 import { config } from '../../../config';
 
 // Mock dependencies
-jest.mock('jsonwebtoken');
-jest.mock('qrcode');
+jest.mock('jsonwebtoken', () => ({
+  sign: jest.fn(),
+  verify: jest.fn(),
+  decode: jest.fn(),
+}));
 
-const mockJwt = jwt as jest.Mocked<typeof jwt>;
-const mockQRCode = QRCode as jest.Mocked<typeof QRCode>;
+jest.mock('qrcode', () => ({
+  toDataURL: jest.fn(),
+}));
+
+// Get typed mocks
+const jwt = require('jsonwebtoken');
+const QRCode = require('qrcode');
+
+const mockJwt = jwt as {
+  sign: jest.MockedFunction<any>;
+  verify: jest.MockedFunction<any>;
+  decode: jest.MockedFunction<any>;
+};
+
+const mockQRCode = QRCode as {
+  toDataURL: jest.MockedFunction<any>;
+};
 
 describe('Auth Utils', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     // Set test environment variables
     process.env.JWT_SECRET = 'test-jwt-secret-32-characters-long';
     process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-32-characters-long';
@@ -42,19 +63,21 @@ describe('Auth Utils', () => {
       const result = generateTokens(payload);
 
       expect(mockJwt.sign).toHaveBeenCalledTimes(2);
-      
+
       // Access token call
-      expect(mockJwt.sign).toHaveBeenNthCalledWith(1,
+      expect(mockJwt.sign).toHaveBeenNthCalledWith(
+        1,
         { ...payload, type: 'access' },
         config.jwt.accessSecret,
-        { expiresIn: config.jwt.accessExpiry }
+        { expiresIn: config.jwt.accessExpiry },
       );
-      
+
       // Refresh token call
-      expect(mockJwt.sign).toHaveBeenNthCalledWith(2,
+      expect(mockJwt.sign).toHaveBeenNthCalledWith(
+        2,
         { ...payload, type: 'refresh' },
         config.jwt.refreshSecret,
-        { expiresIn: config.jwt.refreshExpiry }
+        { expiresIn: config.jwt.refreshExpiry },
       );
 
       expect(result).toEqual({
@@ -76,7 +99,7 @@ describe('Auth Utils', () => {
 
       // Verify access token payload includes all required fields
       const accessTokenCall = mockJwt.sign.mock.calls[0];
-      expect(accessTokenCall[0]).toEqual({
+      expect(accessTokenCall?.[0]).toEqual({
         userId: payload.userId,
         organizationId: payload.organizationId,
         role: payload.role,
@@ -84,7 +107,7 @@ describe('Auth Utils', () => {
 
       // Verify refresh token payload includes only userId
       const refreshTokenCall = mockJwt.sign.mock.calls[1];
-      expect(refreshTokenCall[0]).toEqual({
+      expect(refreshTokenCall?.[0]).toEqual({
         userId: payload.userId,
       });
     });
@@ -177,7 +200,7 @@ describe('Auth Utils', () => {
 
     test('should use correct secret for refresh token verification', () => {
       const token = 'test-token';
-      
+
       mockJwt.verify.mockReturnValue({ userId: 'user-123' } as any);
 
       verifyRefreshToken(token);
@@ -212,7 +235,7 @@ describe('Auth Utils', () => {
 
     test('should call toDataURL with correct URL', async () => {
       const otpauthUrl = 'otpauth://totp/test@example.com?secret=TEST&issuer=App';
-      
+
       mockQRCode.toDataURL.mockResolvedValue('mock-data-url');
 
       await generateQRCode(otpauthUrl);
@@ -221,7 +244,8 @@ describe('Auth Utils', () => {
     });
 
     test('should generate QR code for TOTP URLs with special characters', async () => {
-      const otpauthUrl = 'otpauth://totp/My%20App%3Auser%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=My%20App';
+      const otpauthUrl =
+        'otpauth://totp/My%20App%3Auser%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=My%20App';
       const dataUrl = 'data:image/png;base64,mockdata';
 
       mockQRCode.toDataURL.mockResolvedValue(dataUrl);

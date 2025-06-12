@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # Single container deployment as specified in PRD
+  dumbassets:
+    image: dumbassets-enhanced:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: dumbassets-enhanced
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      # Database configuration
+      USE_EMBEDDED_DB: ${USE_EMBEDDED_DB:-true}
+      DATABASE_URL: ${DATABASE_URL:-}
+      USE_EMBEDDED_REDIS: ${USE_EMBEDDED_REDIS:-true}
+      REDIS_URL: ${REDIS_URL:-}
+      # Required secrets (must be set in production)
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+      # Optional file storage (SMB/CIFS)
+      FILE_STORAGE_TYPE: ${FILE_STORAGE_TYPE:-local}
+      SMB_SHARE: ${SMB_SHARE:-}
+      SMB_USERNAME: ${SMB_USERNAME:-}
+      SMB_PASSWORD: ${SMB_PASSWORD:-}
+      SMB_DOMAIN: ${SMB_DOMAIN:-}
+      # Service configurations
+      BASE_URL: ${BASE_URL:-http://localhost:3001}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      # Email notifications
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@dumbassets.local}
+      # OIDC Configuration
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      # Google Calendar (optional)
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Apprise notifications
+      APPRISE_URL: ${APPRISE_URL:-}
+    volumes:
+      # Data persistence
+      - ${DATA_PATH:-./data}:/var/lib/postgresql/data
+      - ${REDIS_PATH:-./redis}:/var/lib/redis
+      - ${UPLOADS_PATH:-./uploads}:/app/uploads
+      # Optional SMB mount (if using external file storage)
+      # - type: cifs
+      #   source: ${SMB_SHARE}
+      #   target: /app/uploads
+      #   volume:
+      #     nocopy: true
+      #   options:
+      #     - username=${SMB_USERNAME}
+      #     - password=${SMB_PASSWORD}
+      #     - domain=${SMB_DOMAIN}
+      #     - uid=1001
+      #     - gid=1001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  default:
+    name: dumbassets-network

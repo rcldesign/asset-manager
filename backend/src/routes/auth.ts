@@ -1,5 +1,4 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { UserService } from '../services/user.service';
 import { OrganizationService } from '../services/organization.service';
@@ -7,27 +6,19 @@ import { generateTokens, verifyRefreshToken, generateQRCode } from '../utils/aut
 import { ValidationError } from '../utils/errors';
 import { authenticateJWT, type AuthenticatedRequest } from '../middleware/auth';
 import { validateRequest, authSchemas, commonSchemas } from '../middleware/validation';
+import { authRateLimit, twoFactorRateLimit } from '../middleware/security';
+
+// Type definitions for validated request bodies
+type RegisterBody = z.infer<typeof authSchemas.register>;
+type LoginBody = z.infer<typeof authSchemas.login>;
+type ChangePasswordBody = z.infer<typeof authSchemas.changePassword>;
+type RefreshTokenBody = z.infer<typeof authSchemas.refreshToken>;
+type SetupTwoFactorBody = z.infer<typeof authSchemas.setupTwoFactor>;
+type CreateApiTokenBody = z.infer<typeof authSchemas.createApiToken>;
 
 const router = Router();
 const userService = new UserService();
 const organizationService = new OrganizationService();
-
-// Rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
-  message: 'Too many authentication attempts, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-const twoFactorLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 3, // Limit each IP to 3 2FA attempts per windowMs
-  message: 'Too many 2FA attempts, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
 
 /**
  * @swagger
@@ -98,11 +89,11 @@ const twoFactorLimiter = rateLimit({
  */
 router.post(
   '/register',
-  authLimiter,
+  authRateLimit,
   validateRequest({ body: authSchemas.register }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { email, password, fullName, organizationName } = req.body;
+      const { email, password, fullName, organizationName } = req.body as RegisterBody;
 
       // Create organization first
       const organization = await organizationService.createOrganization({
@@ -218,13 +209,20 @@ router.post(
  */
 router.post(
   '/login',
-  authLimiter,
+  authRateLimit,
   validateRequest({ body: authSchemas.login }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { email, password, totpToken } = req.body;
+      const { email, password, totpToken } = req.body as LoginBody;
 
       const authResult = await userService.authenticateUser(email, password, totpToken);
+
+      if (!authResult) {
+        res.status(401).json({
+          error: 'Invalid credentials',
+        });
+        return;
+      }
 
       if (authResult.requiresTwoFactor) {
         res.json({
@@ -236,18 +234,18 @@ router.post(
 
       // Generate tokens
       const tokens = generateTokens({
-        userId: authResult.id,
-        organizationId: authResult.organizationId,
-        role: authResult.role,
+        userId: authResult.user.id,
+        organizationId: authResult.user.organizationId,
+        role: authResult.user.role,
       });
 
       res.json({
         user: {
-          id: authResult.id,
-          email: authResult.email,
-          fullName: authResult.fullName,
-          role: authResult.role,
-          organizationId: authResult.organizationId,
+          id: authResult.user.id,
+          email: authResult.user.email,
+          fullName: authResult.user.fullName,
+          role: authResult.user.role,
+          organizationId: authResult.user.organizationId,
         },
         tokens,
       });
@@ -262,7 +260,7 @@ router.post(
   validateRequest({ body: authSchemas.refreshToken }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { refreshToken } = req.body;
+      const { refreshToken } = req.body as RefreshTokenBody;
 
       const payload = verifyRefreshToken(refreshToken);
 
@@ -329,7 +327,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authenticatedReq = req as AuthenticatedRequest;
-      const { currentPassword, newPassword } = req.body;
+      const { currentPassword, newPassword } = req.body as ChangePasswordBody;
 
       await userService.changePassword(authenticatedReq.user.id, {
         currentPassword,
@@ -351,10 +349,7 @@ router.post(
     try {
       const authenticatedReq = req as AuthenticatedRequest;
 
-      const totpSecret = await userService.setupTwoFactor(
-        authenticatedReq.user.id,
-        authenticatedReq.user.email,
-      );
+      const totpSecret = await userService.setupTwoFactor(authenticatedReq.user.id);
 
       // Generate QR code for easier setup
       const qrCodeDataUrl = await generateQRCode(totpSecret.qrCodeUrl);
@@ -375,12 +370,12 @@ router.post(
 router.post(
   '/2fa/enable',
   authenticateJWT,
-  twoFactorLimiter,
+  twoFactorRateLimit,
   validateRequest({ body: authSchemas.setupTwoFactor }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authenticatedReq = req as AuthenticatedRequest;
-      const { totpToken } = req.body;
+      const { totpToken } = req.body as SetupTwoFactorBody;
 
       await userService.enableTwoFactor(authenticatedReq.user.id, totpToken);
 
@@ -394,12 +389,12 @@ router.post(
 router.post(
   '/2fa/disable',
   authenticateJWT,
-  twoFactorLimiter,
+  twoFactorRateLimit,
   validateRequest({ body: authSchemas.setupTwoFactor }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authenticatedReq = req as AuthenticatedRequest;
-      const { totpToken } = req.body;
+      const { totpToken } = req.body as SetupTwoFactorBody;
 
       await userService.disableTwoFactor(authenticatedReq.user.id, totpToken);
 
@@ -429,7 +424,7 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const authenticatedReq = req as AuthenticatedRequest;
-      const { name, expiresAt } = req.body;
+      const { name, expiresAt } = req.body as CreateApiTokenBody;
 
       const apiToken = await userService.createApiToken(authenticatedReq.user.id, {
         name,

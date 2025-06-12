@@ -1,0 +1,249 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  NODE_VERSION: '20'
+  REGISTRY: docker.io
+  IMAGE_NAME: dumbassets/enhanced
+
+jobs:
+  # Job 1: Create Release Build
+  build:
+    name: Build Release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Generate Prisma client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dumbassets
+      
+      - name: Run tests
+        run: npm run test:unit
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/dumbassets_test
+          JWT_SECRET: test-jwt-secret-32-characters-long
+          JWT_REFRESH_SECRET: test-refresh-secret-32-characters-long
+          SESSION_SECRET: test-session-secret-32-characters-long
+          ENCRYPTION_KEY: test-32-byte-encryption-key-12345
+      
+      - name: Build application
+        run: npm run build
+      
+      - name: Create distribution package
+        run: |
+          mkdir -p ../release
+          cp -r dist package*.json ../release/
+          cp -r prisma ../release/
+          cp docker-entrypoint.sh ../release/
+          cp supervisord.conf ../release/
+          cp Dockerfile ../release/
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build
+          path: release/
+
+  # Job 2: Build Multi-Platform Docker Images
+  docker:
+    name: Build & Publish Docker
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION=${{ github.event.release.tag_name }}
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "major=$(echo ${VERSION} | cut -d. -f1)" >> $GITHUB_OUTPUT
+          echo "minor=$(echo ${VERSION} | cut -d. -f1-2)" >> $GITHUB_OUTPUT
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ steps.version.outputs.major }}
+            type=raw,value=${{ steps.version.outputs.minor }}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Job 3: Create GitHub Release Assets
+  release-assets:
+    name: Create Release Assets
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: github.event_name == 'release'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build
+          path: release/
+      
+      - name: Create release package
+        run: |
+          cd release
+          tar -czf ../dumbassets-enhanced-${{ github.event.release.tag_name }}.tar.gz .
+          cd ..
+      
+      - name: Create quick-start package
+        run: |
+          mkdir -p quickstart
+          cp docker-compose.prod.yml quickstart/
+          cp .env.example quickstart/
+          cp docs/DOCKER-SETUP.md quickstart/README.md
+          cp quickstart.sh quickstart/
+          tar -czf dumbassets-enhanced-quickstart-${{ github.event.release.tag_name }}.tar.gz quickstart/
+      
+      - name: Upload release assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./dumbassets-enhanced-${{ github.event.release.tag_name }}.tar.gz
+          asset_name: dumbassets-enhanced-${{ github.event.release.tag_name }}.tar.gz
+          asset_content_type: application/gzip
+      
+      - name: Upload quickstart package
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./dumbassets-enhanced-quickstart-${{ github.event.release.tag_name }}.tar.gz
+          asset_name: dumbassets-enhanced-quickstart-${{ github.event.release.tag_name }}.tar.gz
+          asset_content_type: application/gzip
+
+  # Job 4: Update Documentation
+  documentation:
+    name: Update Documentation
+    runs-on: ubuntu-latest
+    needs: docker
+    if: github.event_name == 'release'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update version in documentation
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+          sed -i "s/dumbassets-enhanced:.*/dumbassets-enhanced:$VERSION/" docs/DOCKER-SETUP.md
+          sed -i "s/version: .*/version: $VERSION/" docker-compose.prod.yml
+      
+      - name: Commit documentation updates
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/ docker-compose.prod.yml
+          git diff --staged --quiet || git commit -m "docs: update version to ${{ github.event.release.tag_name }}"
+          git push origin main
+
+  # Job 5: Notify Release
+  notify:
+    name: Notify Release
+    runs-on: ubuntu-latest
+    needs: [release-assets, documentation]
+    if: always()
+    
+    steps:
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "🚀 DumbAssets Enhanced ${{ github.event.release.tag_name }} has been released!",
+              "attachments": [
+                {
+                  "color": "good",
+                  "fields": [
+                    {
+                      "title": "Version",
+                      "value": "${{ github.event.release.tag_name }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Docker Image",
+                      "value": "dumbassets/enhanced:${{ github.event.release.tag_name }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Release Notes",
+                      "value": "${{ github.event.release.html_url }}",
+                      "short": false
+                    }
+                  ]
+                }
+              ]
+            }
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}

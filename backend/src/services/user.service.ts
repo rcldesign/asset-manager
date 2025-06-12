@@ -1,30 +1,18 @@
-import { Prisma, UserRole } from '@prisma/client';
+import type { User, UserRole, Prisma } from '@prisma/client';
+import bcrypt from 'bcrypt';
 import { prisma } from '../lib/prisma';
-import {
-  hashPassword,
-  verifyPassword,
-  generateTOTPSecret,
-  verifyTOTPToken,
-  isValidEmail,
-  validatePasswordStrength,
-  generateApiToken,
-  hashApiToken,
-} from '../utils/auth';
-import {
-  NotFoundError,
-  ValidationError,
-  ConflictError,
-  AuthenticationError,
-  AuthorizationError,
-} from '../utils/errors';
-import { logger } from '../utils/logger';
+import { AppError } from '../utils/errors';
+import { generateSecureToken } from '../utils/crypto';
+import { generateTOTPSecret, verifyTOTPToken } from '../utils/auth';
+import { permissionManager, type PermissionContext, filterAttributes } from '../lib/permissions';
 
 export interface CreateUserData {
   email: string;
-  password?: string; // Optional for OIDC-only users
+  password?: string;
   fullName?: string;
-  role?: UserRole;
   organizationId: string;
+  role?: UserRole;
+  emailVerified?: boolean;
 }
 
 export interface UpdateUserData {
@@ -32,260 +20,241 @@ export interface UpdateUserData {
   fullName?: string;
   role?: UserRole;
   isActive?: boolean;
-}
-
-export interface ChangePasswordData {
-  currentPassword: string;
-  newPassword: string;
-}
-
-export interface CreateApiTokenData {
-  name: string;
-  expiresAt?: Date;
+  totpEnabled?: boolean;
 }
 
 export class UserService {
   /**
    * Create a new user
    */
-  async createUser(data: CreateUserData): Promise<{
-    id: string;
-    email: string;
-    fullName: string | null;
-    role: UserRole;
-    organizationId: string;
-    emailVerified: boolean;
-    totpEnabled: boolean;
-    isActive: boolean;
-    createdAt: Date;
-  }> {
-    try {
-      // Validate email
-      if (!isValidEmail(data.email)) {
-        throw new ValidationError('Invalid email format');
-      }
+  async createUser(data: CreateUserData): Promise<User> {
+    const { email, password, organizationId, ...userData } = data;
 
-      // Validate password if provided
-      if (data.password) {
-        const passwordValidation = validatePasswordStrength(data.password);
-        if (!passwordValidation.isValid) {
-          throw new ValidationError('Password requirements not met', {
-            feedback: passwordValidation.feedback,
-          });
-        }
-      }
+    // Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
 
-      // Validate organization exists
-      const organization = await prisma.organization.findUnique({
-        where: { id: data.organizationId },
-      });
-
-      if (!organization) {
-        throw new NotFoundError('Organization', data.organizationId);
-      }
-
-      // Hash password if provided
-      const passwordHash = data.password ? await hashPassword(data.password) : null;
-
-      const user = await prisma.user.create({
-        data: {
-          email: data.email.toLowerCase().trim(),
-          passwordHash,
-          fullName: data.fullName?.trim() || null,
-          role: data.role || UserRole.MEMBER,
-          organizationId: data.organizationId,
-        },
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-          organizationId: true,
-          emailVerified: true,
-          totpEnabled: true,
-          isActive: true,
-          createdAt: true,
-        },
-      });
-
-      logger.info('User created', {
-        userId: user.id,
-        email: user.email,
-        organizationId: user.organizationId,
-        role: user.role,
-      });
-
-      return user;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictError('Email already exists');
-        }
-      }
-      throw error;
+    if (existingUser) {
+      throw new AppError('User with this email already exists', 409);
     }
+
+    // Verify organization exists
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+    });
+
+    if (!organization) {
+      throw new AppError('Organization not found', 404);
+    }
+
+    // Hash password if provided
+    let passwordHash: string | null = null;
+    if (password) {
+      passwordHash = await bcrypt.hash(password, 12);
+    }
+
+    // Create user
+    const user = await prisma.user.create({
+      data: {
+        email: email.toLowerCase(),
+        passwordHash,
+        organizationId,
+        ...userData,
+      },
+      include: {
+        organization: true,
+      },
+    });
+
+    return user;
   }
 
   /**
-   * Get user by ID
+   * Find user by ID
    */
-  async getUserById(id: string): Promise<{
-    id: string;
-    email: string;
-    fullName: string | null;
-    role: UserRole;
-    organizationId: string;
-    emailVerified: boolean;
-    totpEnabled: boolean;
-    isActive: boolean;
-    createdAt: Date;
-    updatedAt: Date;
-  } | null> {
-    const user = await prisma.user.findUnique({
+  async getUserById(id: string): Promise<User | null> {
+    return prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        organizationId: true,
-        emailVerified: true,
-        totpEnabled: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
+      include: {
+        organization: true,
       },
     });
-
-    return user;
   }
 
   /**
-   * Get user by email
+   * Get user by email - alias for findByEmail
    */
-  async getUserByEmail(email: string): Promise<{
-    id: string;
-    email: string;
-    passwordHash: string | null;
-    fullName: string | null;
-    role: UserRole;
-    organizationId: string;
-    totpSecret: string | null;
-    totpEnabled: boolean;
-    emailVerified: boolean;
-    isActive: boolean;
-  } | null> {
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
-      select: {
-        id: true,
-        email: true,
-        passwordHash: true,
-        fullName: true,
-        role: true,
-        organizationId: true,
-        totpSecret: true,
-        totpEnabled: true,
-        emailVerified: true,
-        isActive: true,
-      },
-    });
-
-    return user;
+  async getUserByEmail(email: string): Promise<User | null> {
+    return this.findByEmail(email);
   }
 
   /**
-   * Update user
+   * Find user by email
+   */
+  async findByEmail(email: string): Promise<User | null> {
+    return prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+      include: {
+        organization: true,
+      },
+    });
+  }
+
+  /**
+   * Find all users in an organization with permission filtering
+   */
+  async findByOrganization(
+    organizationId: string,
+    requesterContext?: PermissionContext,
+    options?: {
+      skip?: number;
+      take?: number;
+      role?: UserRole;
+      isActive?: boolean;
+    },
+  ): Promise<{ users: Partial<User>[]; total: number }> {
+    const where: Prisma.UserWhereInput = {
+      organizationId,
+      ...(options?.role && { role: options.role }),
+      ...(options?.isActive !== undefined && { isActive: options.isActive }),
+    };
+
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        skip: options?.skip,
+        take: options?.take,
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.user.count({ where }),
+    ]);
+
+    // Apply permission-based attribute filtering if context provided
+    if (requesterContext) {
+      const permissionResult = permissionManager.can(requesterContext, 'read', 'user', 'any');
+      if (!permissionResult.granted) {
+        throw new AppError('Insufficient permissions to read users', 403);
+      }
+
+      const filteredUsers = users.map((user) =>
+        filterAttributes(user as Record<string, unknown>, permissionResult.attributes),
+      );
+
+      return { users: filteredUsers as Partial<User>[], total };
+    }
+
+    return { users, total };
+  }
+
+  /**
+   * Update user with permission checks
    */
   async updateUser(
     id: string,
     data: UpdateUserData,
-    requestingUserId?: string,
-  ): Promise<{
-    id: string;
-    email: string;
-    fullName: string | null;
-    role: UserRole;
-    isActive: boolean;
-    updatedAt: Date;
-  }> {
-    try {
-      // Get current user data for authorization checks
-      const currentUser = await this.getUserById(id);
-      if (!currentUser) {
-        throw new NotFoundError('User', id);
+    requesterContext?: PermissionContext,
+  ): Promise<User> {
+    // Permission check if context provided
+    if (requesterContext) {
+      const targetUser = await this.getUserById(id);
+      if (!targetUser) {
+        throw new AppError('User not found', 404);
       }
 
-      // Authorization check: users can only update themselves, unless they're admin/owner
-      if (requestingUserId && requestingUserId !== id) {
-        const requestingUser = await this.getUserById(requestingUserId);
-        if (
-          !requestingUser ||
-          requestingUser.organizationId !== currentUser.organizationId ||
-          !['OWNER', 'MANAGER'].includes(requestingUser.role)
-        ) {
-          throw new AuthorizationError('Insufficient permissions to update this user');
-        }
+      const context = {
+        ...requesterContext,
+        resourceOwnerId: targetUser.id,
+        resourceOrganizationId: targetUser.organizationId,
+      };
 
-        // Only owners can change roles or activate/deactivate users
-        if (
-          (data.role !== undefined || data.isActive !== undefined) &&
-          requestingUser.role !== 'OWNER'
-        ) {
-          throw new AuthorizationError('Only organization owners can change user roles or status');
-        }
+      const scope = targetUser.id === requesterContext.userId ? 'own' : 'any';
+      const permissionResult = permissionManager.can(context, 'update', 'user', scope);
+
+      if (!permissionResult.granted) {
+        throw new AppError('Insufficient permissions to update user', 403);
       }
 
-      // Validate email if provided
-      if (data.email && !isValidEmail(data.email)) {
-        throw new ValidationError('Invalid email format');
-      }
+      // Filter the update data based on allowed attributes
+      const filteredData = filterAttributes(
+        data as Record<string, unknown>,
+        permissionResult.attributes,
+      ) as UpdateUserData;
+      data = filteredData;
+    }
 
-      const updateData: Prisma.UserUpdateInput = {};
-      if (data.email !== undefined) {
-        updateData.email = data.email.toLowerCase().trim();
-      }
-      if (data.fullName !== undefined) {
-        updateData.fullName = data.fullName?.trim() || null;
-      }
-      if (data.role !== undefined) {
-        updateData.role = data.role;
-      }
-      if (data.isActive !== undefined) {
-        updateData.isActive = data.isActive;
-      }
-
-      const user = await prisma.user.update({
-        where: { id },
-        data: updateData,
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-          isActive: true,
-          updatedAt: true,
+    // Check if email is being changed and if it's already taken
+    if (data.email) {
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          email: data.email.toLowerCase(),
+          NOT: { id },
         },
       });
 
-      logger.info('User updated', {
-        userId: id,
-        changes: Object.keys(data),
-        updatedBy: requestingUserId,
-      });
-
-      return user;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2025') {
-          throw new NotFoundError('User', id);
-        }
-        if (error.code === 'P2002') {
-          throw new ConflictError('Email already exists');
-        }
+      if (existingUser) {
+        throw new AppError('Email is already in use', 409);
       }
-      throw error;
     }
+
+    const user = await prisma.user.update({
+      where: { id },
+      data: {
+        ...data,
+        ...(data.email && { email: data.email.toLowerCase() }),
+      },
+      include: {
+        organization: true,
+      },
+    });
+
+    return user;
+  }
+
+  /**
+   * Change user password
+   */
+  async changePassword(
+    userId: string,
+    data: { currentPassword: string; newPassword: string },
+  ): Promise<void> {
+    return this.updatePassword(userId, data.currentPassword, data.newPassword);
+  }
+
+  /**
+   * Update user password
+   */
+  async updatePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+
+    if (!user.passwordHash) {
+      throw new AppError('User does not have a password set', 400);
+    }
+
+    // Verify current password
+    const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isValid) {
+      throw new AppError('Current password is incorrect', 401);
+    }
+
+    // Hash new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
+
+    // Update password
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newPasswordHash },
+    });
   }
 
   /**
@@ -295,265 +264,244 @@ export class UserService {
     email: string,
     password: string,
     totpToken?: string,
-  ): Promise<{
-    id: string;
-    email: string;
-    fullName: string | null;
-    role: UserRole;
-    organizationId: string;
-    requiresTwoFactor: boolean;
-  }> {
-    const user = await this.getUserByEmail(email);
-
+  ): Promise<{ user: User; requiresTwoFactor: boolean } | null> {
+    const user = await this.verifyPassword(email, password);
     if (!user) {
-      throw new AuthenticationError('Invalid credentials');
+      return null;
     }
 
-    if (!user.isActive) {
-      throw new AuthenticationError('Account is deactivated');
-    }
-
-    if (!user.passwordHash) {
-      throw new AuthenticationError('Password authentication not available for this account');
-    }
-
-    // Verify password
-    const isPasswordValid = await verifyPassword(password, user.passwordHash);
-    if (!isPasswordValid) {
-      throw new AuthenticationError('Invalid credentials');
-    }
-
-    // Check 2FA if enabled
+    // If user has 2FA enabled, verify TOTP token
     if (user.totpEnabled) {
       if (!totpToken) {
-        return {
-          id: user.id,
-          email: user.email,
-          fullName: user.fullName,
-          role: user.role,
-          organizationId: user.organizationId,
-          requiresTwoFactor: true,
-        };
+        return { user, requiresTwoFactor: true };
       }
 
+      // Verify the TOTP token
       if (!user.totpSecret) {
-        throw new AuthenticationError('2FA configuration error');
+        throw new AppError('2FA is enabled but no secret found. Please contact support.', 500);
       }
 
-      const isTotpValid = verifyTOTPToken(totpToken, user.totpSecret);
-      if (!isTotpValid) {
-        throw new AuthenticationError('Invalid 2FA code');
+      const isValidToken = verifyTOTPToken(totpToken, user.totpSecret);
+      if (!isValidToken) {
+        return null; // Invalid 2FA token - authentication fails
       }
     }
 
-    return {
-      id: user.id,
-      email: user.email,
-      fullName: user.fullName,
-      role: user.role,
-      organizationId: user.organizationId,
-      requiresTwoFactor: false,
-    };
+    return { user, requiresTwoFactor: false };
   }
 
   /**
-   * Change user password
+   * Verify user password
    */
-  async changePassword(userId: string, data: ChangePasswordData): Promise<void> {
+  async verifyPassword(email: string, password: string): Promise<User | null> {
     const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { passwordHash: true },
+      where: { email: email.toLowerCase() },
+      include: {
+        organization: true,
+      },
     });
 
-    if (!user) {
-      throw new NotFoundError('User', userId);
+    if (!user || !user.passwordHash || !user.isActive) {
+      return null;
     }
 
-    if (!user.passwordHash) {
-      throw new ValidationError('Password authentication not available for this account');
-    }
-
-    // Verify current password
-    const isCurrentPasswordValid = await verifyPassword(data.currentPassword, user.passwordHash);
-    if (!isCurrentPasswordValid) {
-      throw new AuthenticationError('Current password is incorrect');
-    }
-
-    // Validate new password
-    const passwordValidation = validatePasswordStrength(data.newPassword);
-    if (!passwordValidation.isValid) {
-      throw new ValidationError('New password requirements not met', {
-        feedback: passwordValidation.feedback,
-      });
-    }
-
-    // Hash and update password
-    const newPasswordHash = await hashPassword(data.newPassword);
-    await prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash: newPasswordHash },
-    });
-
-    logger.info('User password changed', { userId });
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    return isValid ? user : null;
   }
 
   /**
-   * Setup 2FA for user
+   * Delete user (soft delete by deactivating) with permission checks
    */
-  async setupTwoFactor(
-    userId: string,
-    userEmail: string,
-  ): Promise<{
+  async deleteUser(id: string, requesterContext?: PermissionContext): Promise<void> {
+    // Permission check if context provided
+    if (requesterContext) {
+      const targetUser = await this.getUserById(id);
+      if (!targetUser) {
+        throw new AppError('User not found', 404);
+      }
+
+      const context = {
+        ...requesterContext,
+        resourceOwnerId: targetUser.id,
+        resourceOrganizationId: targetUser.organizationId,
+      };
+
+      const permissionResult = permissionManager.can(context, 'delete', 'user', 'any');
+
+      if (!permissionResult.granted) {
+        throw new AppError('Insufficient permissions to delete user', 403);
+      }
+    }
+
+    await prisma.user.update({
+      where: { id },
+      data: { isActive: false },
+    });
+  }
+
+  /**
+   * Setup two-factor authentication
+   */
+  async setupTwoFactor(userId: string): Promise<{
     secret: string;
     qrCodeUrl: string;
     manualEntryKey: string;
   }> {
+    // Get the user to include their email in the TOTP secret
     const user = await this.getUserById(userId);
     if (!user) {
-      throw new NotFoundError('User', userId);
+      throw new AppError('User not found', 404);
     }
 
-    if (user.totpEnabled) {
-      throw new ValidationError('2FA is already enabled for this user');
-    }
+    // Generate TOTP secret
+    const totpSecret = generateTOTPSecret(user.email, 'DumbAssets Enhanced');
 
-    const totpSecret = generateTOTPSecret(userEmail);
-
-    // Store the secret but don't enable 2FA yet (user needs to verify)
+    // Store the temporary secret in the database (not yet enabled)
     await prisma.user.update({
       where: { id: userId },
       data: { totpSecret: totpSecret.secret },
     });
 
-    logger.info('2FA setup initiated', { userId });
-
-    return totpSecret;
+    return {
+      secret: totpSecret.secret,
+      qrCodeUrl: totpSecret.qrCodeUrl,
+      manualEntryKey: totpSecret.manualEntryKey,
+    };
   }
 
   /**
-   * Enable 2FA after verification
+   * Enable two-factor authentication
    */
   async enableTwoFactor(userId: string, totpToken: string): Promise<void> {
+    // Get the user and their temporary TOTP secret
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { totpSecret: true, totpEnabled: true },
     });
 
     if (!user) {
-      throw new NotFoundError('User', userId);
-    }
-
-    if (user.totpEnabled) {
-      throw new ValidationError('2FA is already enabled');
+      throw new AppError('User not found', 404);
     }
 
     if (!user.totpSecret) {
-      throw new ValidationError('2FA setup not initiated. Please setup 2FA first.');
+      throw new AppError('No TOTP secret found. Please set up 2FA first.', 400);
     }
 
-    // Verify the TOTP token
-    const isTokenValid = verifyTOTPToken(totpToken, user.totpSecret);
-    if (!isTokenValid) {
-      throw new AuthenticationError('Invalid 2FA code');
+    // Verify the provided TOTP token
+    const isValidToken = verifyTOTPToken(totpToken, user.totpSecret);
+    if (!isValidToken) {
+      throw new AppError('Invalid TOTP token', 400);
     }
 
-    // Enable 2FA
+    // Enable 2FA for the user
     await prisma.user.update({
       where: { id: userId },
       data: { totpEnabled: true },
     });
-
-    logger.info('2FA enabled', { userId });
   }
 
   /**
-   * Disable 2FA
+   * Disable two-factor authentication
    */
   async disableTwoFactor(userId: string, totpToken: string): Promise<void> {
+    // Get the user and their TOTP secret
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { totpSecret: true, totpEnabled: true },
     });
 
     if (!user) {
-      throw new NotFoundError('User', userId);
+      throw new AppError('User not found', 404);
     }
 
-    if (!user.totpEnabled) {
-      throw new ValidationError('2FA is not enabled');
+    if (!user.totpEnabled || !user.totpSecret) {
+      throw new AppError('2FA is not enabled for this user', 400);
     }
 
-    if (!user.totpSecret) {
-      throw new ValidationError('2FA configuration error');
+    // Verify the provided TOTP token
+    const isValidToken = verifyTOTPToken(totpToken, user.totpSecret);
+    if (!isValidToken) {
+      throw new AppError('Invalid TOTP token', 400);
     }
 
-    // Verify the TOTP token before disabling
-    const isTokenValid = verifyTOTPToken(totpToken, user.totpSecret);
-    if (!isTokenValid) {
-      throw new AuthenticationError('Invalid 2FA code');
-    }
-
-    // Disable 2FA and remove secret
+    // Disable 2FA and remove the secret
     await prisma.user.update({
       where: { id: userId },
       data: {
         totpEnabled: false,
-        totpSecret: null,
+        totpSecret: null, // Remove the secret for security
       },
     });
-
-    logger.info('2FA disabled', { userId });
   }
 
   /**
-   * Create API token for user
+   * Verify user email
+   */
+  async verifyEmail(userId: string): Promise<void> {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { emailVerified: true },
+    });
+  }
+
+  /**
+   * Create API token for user with permission checks
    */
   async createApiToken(
     userId: string,
-    data: CreateApiTokenData,
-  ): Promise<{
-    id: string;
-    name: string;
-    token: string; // Plain token returned only once
-    expiresAt: Date | null;
-  }> {
-    const user = await this.getUserById(userId);
-    if (!user) {
-      throw new NotFoundError('User', userId);
+    data: { name: string; expiresAt?: Date },
+    requesterContext?: PermissionContext,
+  ): Promise<{ token: string; id: string; name: string; expiresAt?: Date }> {
+    // Permission check if context provided
+    if (requesterContext) {
+      const context = {
+        ...requesterContext,
+        resourceOwnerId: userId,
+      };
+
+      const scope = userId === requesterContext.userId ? 'own' : 'any';
+      const permissionResult = permissionManager.can(context, 'create', 'api-token', scope);
+
+      if (!permissionResult.granted) {
+        throw new AppError('Insufficient permissions to create API token', 403);
+      }
     }
 
-    if (!user.isActive) {
-      throw new ValidationError('Cannot create API token for inactive user');
-    }
-
-    // Generate token
-    const plainToken = generateApiToken();
-    const hashedToken = hashApiToken(plainToken);
+    const token = generateSecureToken(32);
+    const hashedToken = await bcrypt.hash(token, 10);
 
     const apiToken = await prisma.apiToken.create({
       data: {
         userId,
-        name: data.name.trim(),
+        name: data.name,
         token: hashedToken,
-        expiresAt: data.expiresAt || null,
+        expiresAt: data.expiresAt,
       },
-      select: {
-        id: true,
-        name: true,
-        expiresAt: true,
-      },
-    });
-
-    logger.info('API token created', {
-      userId,
-      tokenId: apiToken.id,
-      tokenName: apiToken.name,
     });
 
     return {
-      ...apiToken,
-      token: plainToken,
+      token,
+      id: apiToken.id,
+      name: data.name,
+      expiresAt: data.expiresAt,
     };
+  }
+
+  /**
+   * Generate API token for user
+   */
+  async generateApiToken(userId: string, name: string, expiresAt?: Date): Promise<string> {
+    const token = generateSecureToken(32);
+    const hashedToken = await bcrypt.hash(token, 10);
+
+    await prisma.apiToken.create({
+      data: {
+        userId,
+        name,
+        token: hashedToken,
+        expiresAt,
+      },
+    });
+
+    return token;
   }
 
   /**
@@ -568,6 +516,116 @@ export class UserService {
       createdAt: Date;
     }>
   > {
+    return this.listApiTokens(userId);
+  }
+
+  /**
+   * Delete API token
+   */
+  async deleteApiToken(userId: string, tokenId: string): Promise<void> {
+    return this.revokeApiToken(userId, tokenId);
+  }
+
+  /**
+   * Verify API token - alias for validateApiToken
+   */
+  async verifyApiToken(token: string): Promise<User | null> {
+    return this.validateApiToken(token);
+  }
+
+  /**
+   * Validate API token
+   */
+  async validateApiToken(token: string): Promise<User | null> {
+    const apiTokens = await prisma.apiToken.findMany({
+      where: {
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
+      include: {
+        user: {
+          include: {
+            organization: true,
+          },
+        },
+      },
+    });
+
+    for (const apiToken of apiTokens) {
+      const isValid = await bcrypt.compare(token, apiToken.token);
+      if (isValid) {
+        // Update last used timestamp
+        await prisma.apiToken.update({
+          where: { id: apiToken.id },
+          data: { lastUsed: new Date() },
+        });
+        return apiToken.user;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Revoke API token with permission checks
+   */
+  async revokeApiToken(
+    userId: string,
+    tokenId: string,
+    requesterContext?: PermissionContext,
+  ): Promise<void> {
+    // Permission check if context provided
+    if (requesterContext) {
+      const context = {
+        ...requesterContext,
+        resourceOwnerId: userId,
+      };
+
+      const scope = userId === requesterContext.userId ? 'own' : 'any';
+      const permissionResult = permissionManager.can(context, 'delete', 'api-token', scope);
+
+      if (!permissionResult.granted) {
+        throw new AppError('Insufficient permissions to revoke API token', 403);
+      }
+    }
+
+    await prisma.apiToken.deleteMany({
+      where: {
+        id: tokenId,
+        userId,
+      },
+    });
+  }
+
+  /**
+   * List user's API tokens with permission checks
+   */
+  async listApiTokens(
+    userId: string,
+    requesterContext?: PermissionContext,
+  ): Promise<
+    Array<{
+      id: string;
+      name: string;
+      lastUsed: Date | null;
+      expiresAt: Date | null;
+      createdAt: Date;
+    }>
+  > {
+    // Permission check if context provided
+    if (requesterContext) {
+      const context = {
+        ...requesterContext,
+        resourceOwnerId: userId,
+      };
+
+      const scope = userId === requesterContext.userId ? 'own' : 'any';
+      const permissionResult = permissionManager.can(context, 'read', 'api-token', scope);
+
+      if (!permissionResult.granted) {
+        throw new AppError('Insufficient permissions to read API tokens', 403);
+      }
+    }
+
     const tokens = await prisma.apiToken.findMany({
       where: { userId },
       select: {
@@ -584,104 +642,58 @@ export class UserService {
   }
 
   /**
-   * Delete API token
+   * Get filtered user data based on permissions
    */
-  async deleteApiToken(userId: string, tokenId: string): Promise<void> {
-    const token = await prisma.apiToken.findFirst({
-      where: { id: tokenId, userId },
-    });
-
-    if (!token) {
-      throw new NotFoundError('API token not found');
-    }
-
-    await prisma.apiToken.delete({
-      where: { id: tokenId },
-    });
-
-    logger.info('API token deleted', { userId, tokenId });
-  }
-
-  /**
-   * Verify API token and return user
-   */
-  async verifyApiToken(token: string): Promise<{
-    id: string;
-    email: string;
-    role: UserRole;
-    organizationId: string;
-    isActive: boolean;
-  } | null> {
-    const hashedToken = hashApiToken(token);
-
-    const apiToken = await prisma.apiToken.findUnique({
-      where: { token: hashedToken },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            role: true,
-            organizationId: true,
-            isActive: true,
-          },
-        },
-      },
-    });
-
-    if (!apiToken || !apiToken.user.isActive) {
-      return null;
-    }
-
-    // Check if token is expired
-    if (apiToken.expiresAt && apiToken.expiresAt < new Date()) {
-      return null;
-    }
-
-    // Update last used timestamp
-    await prisma.apiToken.update({
-      where: { id: apiToken.id },
-      data: { lastUsed: new Date() },
-    });
-
-    return apiToken.user;
-  }
-
-  /**
-   * Delete user account
-   */
-  async deleteUser(id: string, requestingUserId?: string): Promise<void> {
+  async getUserWithPermissions(
+    id: string,
+    requesterContext: PermissionContext,
+  ): Promise<Partial<User> | null> {
     const user = await this.getUserById(id);
     if (!user) {
-      throw new NotFoundError('User', id);
+      return null;
     }
 
-    // Authorization check
-    if (requestingUserId && requestingUserId !== id) {
-      const requestingUser = await this.getUserById(requestingUserId);
-      if (
-        !requestingUser ||
-        requestingUser.organizationId !== user.organizationId ||
-        requestingUser.role !== 'OWNER'
-      ) {
-        throw new AuthorizationError('Only organization owners can delete users');
-      }
+    const context = {
+      ...requesterContext,
+      resourceOwnerId: user.id,
+      resourceOrganizationId: user.organizationId,
+    };
+
+    const scope = user.id === requesterContext.userId ? 'own' : 'any';
+    const permissionResult = permissionManager.can(context, 'read', 'user', scope);
+
+    if (!permissionResult.granted) {
+      throw new AppError('Insufficient permissions to read user', 403);
     }
 
-    // Cannot delete organization owner
-    const organization = await prisma.organization.findUnique({
-      where: { id: user.organizationId },
-      select: { ownerUserId: true },
-    });
+    return filterAttributes(
+      user as Record<string, unknown>,
+      permissionResult.attributes,
+    ) as Partial<User>;
+  }
 
-    if (organization?.ownerUserId === id) {
-      throw new ValidationError('Cannot delete organization owner. Transfer ownership first.');
+  /**
+   * Check if user can perform action on another user
+   */
+  async canPerformAction(
+    requesterContext: PermissionContext,
+    targetUserId: string,
+    action: 'read' | 'update' | 'delete',
+  ): Promise<boolean> {
+    const targetUser = await this.getUserById(targetUserId);
+    if (!targetUser) {
+      return false;
     }
 
-    await prisma.user.delete({
-      where: { id },
-    });
+    const context = {
+      ...requesterContext,
+      resourceOwnerId: targetUser.id,
+      resourceOrganizationId: targetUser.organizationId,
+    };
 
-    logger.info('User deleted', { userId: id, deletedBy: requestingUserId });
+    const scope = targetUser.id === requesterContext.userId ? 'own' : 'any';
+    const permissionResult = permissionManager.can(context, action, 'user', scope);
+
+    return permissionResult.granted;
   }
 }

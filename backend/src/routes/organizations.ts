@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import type { z } from 'zod';
 import { OrganizationService } from '../services/organization.service';
 import {
   authenticateJWT,
@@ -7,6 +8,11 @@ import {
   type AuthenticatedRequest,
 } from '../middleware/auth';
 import { validateRequest, organizationSchemas } from '../middleware/validation';
+
+// Type definitions for validated request bodies
+type OrganizationUpdateBody = z.infer<typeof organizationSchemas.update>;
+type OrganizationSetOwnerBody = z.infer<typeof organizationSchemas.setOwner>;
+type OrganizationParamsBody = z.infer<typeof organizationSchemas.params>;
 
 const router = Router();
 const organizationService = new OrganizationService();
@@ -35,7 +41,7 @@ router.get(
   validateRequest({ params: organizationSchemas.params }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { organizationId } = req.params as { organizationId: string };
+      const { organizationId } = req.params as OrganizationParamsBody;
 
       const organization = await organizationService.getOrganizationById(organizationId);
 
@@ -57,8 +63,8 @@ router.put(
   }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { organizationId } = req.params as { organizationId: string };
-      const { name } = req.body;
+      const { organizationId } = req.params as OrganizationParamsBody;
+      const { name } = req.body as OrganizationUpdateBody;
 
       const organization = await organizationService.updateOrganization(organizationId, { name });
 
@@ -76,7 +82,7 @@ router.get(
   validateRequest({ params: organizationSchemas.params }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { organizationId } = req.params as { organizationId: string };
+      const { organizationId } = req.params as OrganizationParamsBody;
 
       const members = await organizationService.getMembers(organizationId);
 
@@ -94,7 +100,7 @@ router.get(
   validateRequest({ params: organizationSchemas.params }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { organizationId } = req.params as { organizationId: string };
+      const { organizationId } = req.params as OrganizationParamsBody;
 
       const statistics = await organizationService.getStatistics(organizationId);
 
@@ -116,8 +122,8 @@ router.put(
   }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { organizationId } = req.params as { organizationId: string };
-      const { userId } = req.body;
+      const { organizationId } = req.params as OrganizationParamsBody;
+      const { userId } = req.body as OrganizationSetOwnerBody;
 
       await organizationService.setOwner(organizationId, userId);
 
@@ -136,7 +142,7 @@ router.delete(
   validateRequest({ params: organizationSchemas.params }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { organizationId } = req.params as { organizationId: string };
+      const { organizationId } = req.params as OrganizationParamsBody;
 
       await organizationService.deleteOrganization(organizationId);
 

@@ -1,0 +1,20 @@
+# Development Dockerfile for Backend
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies first to leverage Docker layer caching
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Copy the rest of the source code
+COPY . .
+
+# Generate Prisma client
+RUN npx prisma generate
+
+# Express server runs on port 3001
+EXPOSE 3001
+
+# Use the existing dev script which uses tsx watch
+CMD ["npm", "run", "dev"]

@@ -1,3 +1,6 @@
+/**
+ * Custom application error class
+ */
 export class AppError extends Error {
   public statusCode: number;
   public code?: string;
@@ -12,18 +15,20 @@ export class AppError extends Error {
     Error.captureStackTrace(this, this.constructor);
   }
 
-  toJSON(): { error: { code: string; message: string; details?: unknown; timestamp: string } } {
+  toJSON(): Record<string, unknown> {
     return {
-      error: {
-        code: this.code || 'INTERNAL_ERROR',
-        message: this.message,
-        details: this.details,
-        timestamp: new Date().toISOString(),
-      },
+      name: this.name,
+      message: this.message,
+      statusCode: this.statusCode,
+      code: this.code,
+      details: this.details,
     };
   }
 }
 
+/**
+ * Validation error class
+ */
 export class ValidationError extends AppError {
   constructor(message: string, details?: unknown) {
     super(message, 400, 'VALIDATION_ERROR', details);
@@ -31,59 +36,62 @@ export class ValidationError extends AppError {
   }
 }
 
+/**
+ * Authentication error class
+ */
 export class AuthenticationError extends AppError {
-  constructor(message: string = 'Authentication required') {
-    super(message, 401, 'UNAUTHORIZED');
+  constructor(message: string = 'Authentication failed') {
+    super(message, 401, 'AUTHENTICATION_ERROR');
     this.name = 'AuthenticationError';
   }
 }
 
+/**
+ * Authorization error class
+ */
 export class AuthorizationError extends AppError {
   constructor(message: string = 'Access denied') {
-    super(message, 403, 'FORBIDDEN');
+    super(message, 403, 'AUTHORIZATION_ERROR');
     this.name = 'AuthorizationError';
   }
 }
 
+/**
+ * Not found error class
+ */
 export class NotFoundError extends AppError {
-  constructor(resource: string, id?: string) {
-    const message = id ? `${resource} with id ${id} not found` : `${resource} not found`;
-    super(message, 404, 'NOT_FOUND');
+  constructor(resource: string) {
+    super(`${resource} not found`, 404, 'NOT_FOUND');
     this.name = 'NotFoundError';
   }
 }
 
+/**
+ * Conflict error class
+ */
 export class ConflictError extends AppError {
-  constructor(message: string, details?: unknown) {
-    super(message, 409, 'CONFLICT', details);
+  constructor(message: string) {
+    super(message, 409, 'CONFLICT_ERROR');
     this.name = 'ConflictError';
   }
 }
 
+/**
+ * Rate limit error class
+ */
 export class RateLimitError extends AppError {
   constructor(message: string = 'Too many requests') {
-    super(message, 429, 'RATE_LIMIT_EXCEEDED');
+    super(message, 429, 'RATE_LIMIT_ERROR');
     this.name = 'RateLimitError';
   }
 }
 
+/**
+ * Configuration error class
+ */
 export class ConfigurationError extends AppError {
   constructor(message: string) {
     super(message, 500, 'CONFIGURATION_ERROR');
     this.name = 'ConfigurationError';
   }
 }
-
-// Error codes enum
-export const ERROR_CODES = {
-  UNAUTHORIZED: 'UNAUTHORIZED',
-  FORBIDDEN: 'FORBIDDEN',
-  NOT_FOUND: 'NOT_FOUND',
-  VALIDATION_ERROR: 'VALIDATION_ERROR',
-  INTERNAL_ERROR: 'INTERNAL_ERROR',
-  RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
-  CONFLICT: 'CONFLICT',
-  CONFIGURATION_ERROR: 'CONFIGURATION_ERROR',
-} as const;
-
-export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

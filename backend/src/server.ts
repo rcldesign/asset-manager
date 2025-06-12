@@ -1,11 +1,10 @@
 import express from 'express';
 import type { Express } from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
-import rateLimit from 'express-rate-limit';
 import swaggerUi from 'swagger-ui-express';
+import rateLimit from 'express-rate-limit';
 
 import { config } from './config';
 import { logger } from './utils/logger';
@@ -18,19 +17,25 @@ import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import organizationRoutes from './routes/organizations';
 import oidcRoutes from './routes/oidc';
+import {
+  securityHeaders,
+  generalRateLimit,
+  securityLogger,
+  configureCORS,
+} from './middleware/security';
 
 const app: Express = express();
 
+// Security middleware
+app.set('trust proxy', 1); // Trust first proxy
+app.use(securityLogger);
+app.use(securityHeaders());
+app.use(cors(configureCORS()));
+app.use(generalRateLimit);
+
 // Basic middleware
-app.use(helmet());
-app.use(
-  cors({
-    origin: config.cors.allowedOrigins,
-    credentials: true,
-  }),
-);
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
 // Session configuration
@@ -53,7 +58,7 @@ const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
   message: 'Too many API requests, please try again later.',
-  standardHeaders: true,
+  standardHeaders: 'draft-8',
   legacyHeaders: false,
 });
 

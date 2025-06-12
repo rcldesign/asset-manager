@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { Application } from 'express';
+import type { Application } from 'express';
 import request from 'supertest';
 import { generateTokens } from '../utils/auth';
 import type { UserRole } from '@prisma/client';
@@ -12,6 +12,9 @@ export interface TestUser {
   organizationId: string;
   accessToken: string;
   refreshToken: string;
+  accessTokenExpiry: number;
+  refreshTokenExpiry: number;
+  tokenId: string;
 }
 
 export interface TestOrganization {
@@ -51,10 +54,12 @@ export class TestDatabaseHelper {
     await this.prisma.organization.deleteMany();
   }
 
-  async createTestOrganization(data: {
-    name?: string;
-    ownerId?: string;
-  } = {}): Promise<TestOrganization> {
+  async createTestOrganization(
+    data: {
+      name?: string;
+      ownerId?: string;
+    } = {},
+  ): Promise<TestOrganization> {
     const organization = await this.prisma.organization.create({
       data: {
         name: data.name || `Test Org ${Date.now()}`,
@@ -69,16 +74,18 @@ export class TestDatabaseHelper {
     };
   }
 
-  async createTestUser(data: {
-    email?: string;
-    fullName?: string;
-    role?: UserRole;
-    organizationId?: string;
-    password?: string;
-    emailVerified?: boolean;
-    totpEnabled?: boolean;
-    isActive?: boolean;
-  } = {}): Promise<TestUser> {
+  async createTestUser(
+    data: {
+      email?: string;
+      fullName?: string;
+      role?: UserRole;
+      organizationId?: string;
+      password?: string;
+      emailVerified?: boolean;
+      totpEnabled?: boolean;
+      isActive?: boolean;
+    } = {},
+  ): Promise<TestUser> {
     let organizationId = data.organizationId;
 
     // Create organization if not provided
@@ -123,13 +130,19 @@ export class TestDatabaseHelper {
       organizationId: user.organizationId,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
+      accessTokenExpiry: tokens.accessTokenExpiry,
+      refreshTokenExpiry: tokens.refreshTokenExpiry,
+      tokenId: tokens.tokenId,
     };
   }
 
-  async createApiToken(userId: string, data: {
-    name?: string;
-    expiresAt?: Date;
-  } = {}): Promise<{ id: string; token: string; name: string }> {
+  async createApiToken(
+    userId: string,
+    data: {
+      name?: string;
+      expiresAt?: Date;
+    } = {},
+  ): Promise<{ id: string; token: string; name: string }> {
     const token = await this.prisma.apiToken.create({
       data: {
         name: data.name || `Test Token ${Date.now()}`,
@@ -155,24 +168,40 @@ export class TestDatabaseHelper {
  * Test API helper for making authenticated requests
  */
 export class TestAPIHelper {
-  public request: request.SuperTest<request.Test>;
+  public app: Application;
+  public request: ReturnType<typeof request>;
 
   constructor(app: Application) {
+    this.app = app;
     this.request = request(app);
   }
 
   /**
    * Make authenticated request with JWT token
    */
-  authenticatedRequest(token: string): request.Test {
-    return this.request.get('').set('Authorization', `Bearer ${token}`);
+  authenticatedRequest(token: string) {
+    return {
+      get: (url: string) => request(this.app).get(url).set('Authorization', `Bearer ${token}`),
+      post: (url: string) => request(this.app).post(url).set('Authorization', `Bearer ${token}`),
+      put: (url: string) => request(this.app).put(url).set('Authorization', `Bearer ${token}`),
+      patch: (url: string) => request(this.app).patch(url).set('Authorization', `Bearer ${token}`),
+      delete: (url: string) =>
+        request(this.app).delete(url).set('Authorization', `Bearer ${token}`),
+    };
   }
 
   /**
    * Make request with API token
    */
-  apiTokenRequest(token: string): request.Test {
-    return this.request.get('').set('Authorization', `Bearer ${token}`);
+  apiTokenRequest(token: string) {
+    return {
+      get: (url: string) => request(this.app).get(url).set('Authorization', `Bearer ${token}`),
+      post: (url: string) => request(this.app).post(url).set('Authorization', `Bearer ${token}`),
+      put: (url: string) => request(this.app).put(url).set('Authorization', `Bearer ${token}`),
+      patch: (url: string) => request(this.app).patch(url).set('Authorization', `Bearer ${token}`),
+      delete: (url: string) =>
+        request(this.app).delete(url).set('Authorization', `Bearer ${token}`),
+    };
   }
 }
 
@@ -220,7 +249,7 @@ export function generateMockOIDCTokens(overrides: any = {}) {
  * Sleep utility for async tests
  */
 export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

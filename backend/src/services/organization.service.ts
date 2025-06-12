@@ -1,87 +1,99 @@
-import { Prisma } from '@prisma/client';
+import type { Organization, User } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { NotFoundError, ValidationError, ConflictError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { AppError } from '../utils/errors';
+import { UserService } from './user.service';
+import bcrypt from 'bcrypt';
 
 export interface CreateOrganizationData {
   name: string;
+  ownerEmail: string;
+  ownerPassword?: string;
+  ownerFullName?: string;
 }
 
 export interface UpdateOrganizationData {
   name?: string;
 }
 
+/**
+ * Service for managing organizations and their relationships with users
+ */
 export class OrganizationService {
   /**
-   * Create a new organization
+   * Create a new organization without an owner
+   * @param data - Organization creation data containing name
+   * @returns Promise resolving to the created organization
    */
-  async createOrganization(data: CreateOrganizationData): Promise<{
-    id: string;
-    name: string;
-    createdAt: Date;
-    updatedAt: Date;
-  }> {
-    try {
-      // Validate organization name
-      if (!data.name || data.name.trim().length === 0) {
-        throw new ValidationError('Organization name is required');
-      }
-
-      if (data.name.length > 255) {
-        throw new ValidationError('Organization name must be less than 255 characters');
-      }
-
-      const organization = await prisma.organization.create({
-        data: {
-          name: data.name.trim(),
-        },
-        select: {
-          id: true,
-          name: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-
-      logger.info('Organization created', {
-        organizationId: organization.id,
-        name: organization.name,
-      });
-
-      return organization;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictError('Organization name already exists');
-        }
-      }
-      throw error;
-    }
+  async createOrganization(data: { name: string }): Promise<Organization> {
+    return prisma.organization.create({
+      data: { name: data.name },
+    });
   }
 
   /**
-   * Get organization by ID
+   * Create a new organization with an owner user in a single transaction
+   * @param data - Organization and owner creation data
+   * @returns Promise resolving to organization and owner user objects
+   * @throws {AppError} When email is already in use
    */
-  async getOrganizationById(id: string): Promise<{
-    id: string;
-    name: string;
-    ownerUserId: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-    _count: {
-      users: number;
-      assets: number;
-      tasks: number;
-    };
+  async create(data: CreateOrganizationData): Promise<{
+    organization: Organization;
+    owner: User;
   }> {
-    const organization = await prisma.organization.findUnique({
+    const { name, ownerEmail, ownerPassword, ownerFullName } = data;
+
+    // Check if email is already in use
+    const existingUser = await prisma.user.findUnique({
+      where: { email: ownerEmail.toLowerCase() },
+    });
+
+    if (existingUser) {
+      throw new AppError('Email is already in use', 409);
+    }
+
+    // Create organization and owner in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create organization without owner first
+      const organization = await tx.organization.create({
+        data: { name },
+      });
+
+      // Create owner user
+      const owner = await tx.user.create({
+        data: {
+          email: ownerEmail.toLowerCase(),
+          passwordHash: ownerPassword ? await hashPassword(ownerPassword) : null,
+          fullName: ownerFullName,
+          role: UserRole.OWNER,
+          organizationId: organization.id,
+          emailVerified: false,
+          isActive: true,
+        },
+      });
+
+      // Update organization with owner reference
+      const updatedOrganization = await tx.organization.update({
+        where: { id: organization.id },
+        data: { ownerUserId: owner.id },
+      });
+
+      return { organization: updatedOrganization, owner };
+    });
+
+    return result;
+  }
+
+  /**
+   * Find an organization by its ID with related data
+   * @param id - Organization ID to search for
+   * @returns Promise resolving to organization with owner and counts, or null if not found
+   */
+  async getOrganizationById(id: string): Promise<Organization | null> {
+    return prisma.organization.findUnique({
       where: { id },
-      select: {
-        id: true,
-        name: true,
-        ownerUserId: true,
-        createdAt: true,
-        updatedAt: true,
+      include: {
+        owner: true,
         _count: {
           select: {
             users: true,
@@ -91,225 +103,363 @@ export class OrganizationService {
         },
       },
     });
+  }
+
+  /**
+   * Find all organizations with pagination and search (admin only)
+   * @param options - Query options for pagination and search
+   * @param options.skip - Number of records to skip for pagination
+   * @param options.take - Number of records to take for pagination
+   * @param options.search - Search term to filter by name or owner email
+   * @returns Promise resolving to organizations array and total count
+   */
+  async findAll(options?: {
+    skip?: number;
+    take?: number;
+    search?: string;
+  }): Promise<{ organizations: Organization[]; total: number }> {
+    const where = options?.search
+      ? {
+          OR: [
+            { name: { contains: options.search, mode: 'insensitive' as const } },
+            { owner: { email: { contains: options.search, mode: 'insensitive' as const } } },
+          ],
+        }
+      : {};
+
+    const [organizations, total] = await Promise.all([
+      prisma.organization.findMany({
+        where,
+        skip: options?.skip,
+        take: options?.take,
+        include: {
+          owner: true,
+          _count: {
+            select: {
+              users: true,
+              assets: true,
+              tasks: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.organization.count({ where }),
+    ]);
+
+    return { organizations, total };
+  }
+
+  /**
+   * Update an organization's data
+   * @param id - Organization ID to update
+   * @param data - Update data for the organization
+   * @returns Promise resolving to the updated organization
+   * @throws {AppError} When organization is not found
+   */
+  async updateOrganization(id: string, data: UpdateOrganizationData): Promise<Organization> {
+    const organization = await prisma.organization.findUnique({
+      where: { id },
+    });
 
     if (!organization) {
-      throw new NotFoundError('Organization', id);
+      throw new AppError('Organization not found', 404);
     }
 
-    return organization;
-  }
-
-  /**
-   * Update organization
-   */
-  async updateOrganization(
-    id: string,
-    data: UpdateOrganizationData,
-  ): Promise<{
-    id: string;
-    name: string;
-    updatedAt: Date;
-  }> {
-    try {
-      // Validate input
-      if (data.name !== undefined) {
-        if (!data.name || data.name.trim().length === 0) {
-          throw new ValidationError('Organization name cannot be empty');
-        }
-        if (data.name.length > 255) {
-          throw new ValidationError('Organization name must be less than 255 characters');
-        }
-      }
-
-      const updateData: Prisma.OrganizationUpdateInput = {};
-      if (data.name !== undefined) {
-        updateData.name = data.name.trim();
-      }
-
-      const organization = await prisma.organization.update({
-        where: { id },
-        data: updateData,
-        select: {
-          id: true,
-          name: true,
-          updatedAt: true,
+    return prisma.organization.update({
+      where: { id },
+      data,
+      include: {
+        owner: true,
+        _count: {
+          select: {
+            users: true,
+            assets: true,
+            tasks: true,
+          },
         },
-      });
-
-      logger.info('Organization updated', { organizationId: id, changes: Object.keys(data) });
-
-      return organization;
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2025') {
-          throw new NotFoundError('Organization', id);
-        }
-        if (error.code === 'P2002') {
-          throw new ConflictError('Organization name already exists');
-        }
-      }
-      throw error;
-    }
+      },
+    });
   }
 
   /**
-   * Delete organization (and cascade to users, assets, tasks)
+   * Delete an organization and all its related data (cascade delete)
+   * @param id - Organization ID to delete
+   * @throws {AppError} When organization is not found
    */
   async deleteOrganization(id: string): Promise<void> {
-    try {
-      await prisma.organization.delete({
-        where: { id },
-      });
-
-      logger.info('Organization deleted', { organizationId: id });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2025') {
-          throw new NotFoundError('Organization', id);
-        }
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Set organization owner
-   */
-  async setOwner(organizationId: string, userId: string): Promise<void> {
-    try {
-      // Verify the user exists and belongs to this organization
-      const user = await prisma.user.findFirst({
-        where: {
-          id: userId,
-          organizationId,
-        },
-      });
-
-      if (!user) {
-        throw new NotFoundError('User not found in organization', userId);
-      }
-
-      await prisma.organization.update({
-        where: { id: organizationId },
-        data: { ownerUserId: userId },
-      });
-
-      logger.info('Organization owner updated', { organizationId, newOwnerId: userId });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2025') {
-          throw new NotFoundError('Organization', organizationId);
-        }
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Get organization members
-   */
-  async getMembers(organizationId: string): Promise<
-    Array<{
-      id: string;
-      email: string;
-      fullName: string | null;
-      role: string;
-      isActive: boolean;
-      emailVerified: boolean;
-      createdAt: Date;
-    }>
-  > {
     const organization = await prisma.organization.findUnique({
-      where: { id: organizationId },
+      where: { id },
     });
 
     if (!organization) {
-      throw new NotFoundError('Organization', organizationId);
+      throw new AppError('Organization not found', 404);
     }
 
-    const members = await prisma.user.findMany({
-      where: { organizationId },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-        emailVerified: true,
-        createdAt: true,
-      },
-      orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+    // Delete organization (cascade will handle related data)
+    await prisma.organization.delete({
+      where: { id },
     });
-
-    return members;
   }
 
   /**
-   * Get organization statistics
+   * Get comprehensive statistics for an organization
+   * @param id - Organization ID to get statistics for
+   * @returns Promise resolving to statistics object with counts and breakdowns
+   * @throws {AppError} When organization is not found
    */
-  async getStatistics(organizationId: string): Promise<{
+  async getStatistics(id: string): Promise<{
     totalUsers: number;
-    activeUsers: number;
     totalAssets: number;
     totalTasks: number;
-    completedTasks: number;
-    overdueTasks: number;
+    tasksByStatus: Record<string, number>;
+    usersByRole: Record<string, number>;
   }> {
     const organization = await prisma.organization.findUnique({
-      where: { id: organizationId },
+      where: { id },
     });
 
     if (!organization) {
-      throw new NotFoundError('Organization', organizationId);
+      throw new AppError('Organization not found', 404);
     }
 
-    const [userStats, assetCount, taskStats] = await Promise.all([
-      prisma.user.groupBy({
-        where: { organizationId },
-        by: ['isActive'],
+    const [totalUsers, totalAssets, totalTasks, tasksByStatus, usersByRole] = await Promise.all([
+      prisma.user.count({ where: { organizationId: id } }),
+      prisma.asset.count({ where: { organizationId: id } }),
+      prisma.task.count({ where: { organizationId: id } }),
+      prisma.task.groupBy({
+        by: ['status'],
+        where: { organizationId: id },
         _count: true,
       }),
-      prisma.asset.count({
-        where: { organizationId },
-      }),
-      prisma.task.groupBy({
-        where: { organizationId },
-        by: ['status'],
+      prisma.user.groupBy({
+        by: ['role'],
+        where: { organizationId: id },
         _count: true,
       }),
     ]);
 
-    const totalUsers = userStats.reduce(
-      (sum: number, stat: { _count: number }) => sum + stat._count,
-      0,
-    );
-    const activeUsers =
-      userStats.find((stat: { isActive: boolean; _count: number }) => stat.isActive)?._count ?? 0;
+    return {
+      totalUsers,
+      totalAssets,
+      totalTasks,
+      tasksByStatus: tasksByStatus.reduce(
+        (acc, item) => {
+          acc[item.status] = item._count;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
+      usersByRole: usersByRole.reduce(
+        (acc, item) => {
+          acc[item.role] = item._count;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
+    };
+  }
 
-    const totalTasks = taskStats.reduce(
-      (sum: number, stat: { _count: number }) => sum + stat._count,
-      0,
-    );
-    const completedTasks =
-      taskStats.find((stat: { status: string; _count: number }) => stat.status === 'DONE')
-        ?._count ?? 0;
+  /**
+   * Transfer organization ownership from current owner to another user
+   * @param organizationId - ID of the organization
+   * @param newOwnerId - ID of the user to become the new owner
+   * @param currentOwnerId - ID of the current owner (for verification)
+   * @returns Promise resolving to the updated organization
+   * @throws {AppError} When organization not found, current owner verification fails, or new owner not found
+   */
+  async transferOwnership(
+    organizationId: string,
+    newOwnerId: string,
+    currentOwnerId: string,
+  ): Promise<Organization> {
+    // Verify organization exists
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      include: { owner: true },
+    });
 
-    // Get overdue tasks count
-    const overdueTasks = await prisma.task.count({
+    if (!organization) {
+      throw new AppError('Organization not found', 404);
+    }
+
+    // Verify current owner
+    if (organization.ownerUserId !== currentOwnerId) {
+      throw new AppError('Only the current owner can transfer ownership', 403);
+    }
+
+    // Verify new owner exists and belongs to the organization
+    const newOwner = await prisma.user.findFirst({
       where: {
-        organizationId,
-        status: { in: ['PLANNED', 'IN_PROGRESS'] },
-        dueDate: { lt: new Date() },
+        id: newOwnerId,
+        organizationId: organizationId,
       },
     });
 
-    return {
-      totalUsers,
-      activeUsers,
-      totalAssets: assetCount,
-      totalTasks,
-      completedTasks,
-      overdueTasks,
-    };
+    if (!newOwner) {
+      throw new AppError('New owner not found in organization', 404);
+    }
+
+    // Transfer ownership in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update new owner role to OWNER
+      await tx.user.update({
+        where: { id: newOwnerId },
+        data: { role: UserRole.OWNER },
+      });
+
+      // Update old owner role to MANAGER
+      await tx.user.update({
+        where: { id: currentOwnerId },
+        data: { role: UserRole.MANAGER },
+      });
+
+      // Update organization owner
+      return tx.organization.update({
+        where: { id: organizationId },
+        data: { ownerUserId: newOwnerId },
+        include: {
+          owner: true,
+          _count: {
+            select: {
+              users: true,
+              assets: true,
+              tasks: true,
+            },
+          },
+        },
+      });
+    });
+
+    return result;
   }
+
+  /**
+   * Set a user as the organization owner (internal use)
+   * @param organizationId - ID of the organization
+   * @param userId - ID of the user to set as owner
+   * @throws {AppError} When organization or user is not found
+   */
+  async setOwner(organizationId: string, userId: string): Promise<void> {
+    // Verify organization exists
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+    });
+
+    if (!organization) {
+      throw new AppError('Organization not found', 404);
+    }
+
+    // Verify user exists
+    const user = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        organizationId: organizationId,
+      },
+    });
+
+    if (!user) {
+      throw new AppError('User not found in organization', 404);
+    }
+
+    // Update organization owner
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { ownerUserId: userId },
+    });
+
+    // Update user role to OWNER
+    await prisma.user.update({
+      where: { id: userId },
+      data: { role: UserRole.OWNER },
+    });
+  }
+
+  /**
+   * Get all members of an organization
+   * @param organizationId - ID of the organization to get members for
+   * @returns Promise resolving to array of user objects
+   */
+  async getMembers(organizationId: string): Promise<User[]> {
+    return prisma.user.findMany({
+      where: { organizationId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * Add a new user to an organization
+   * @param organizationId - ID of the organization to add user to
+   * @param userData - User data including email, optional password, name, and role
+   * @returns Promise resolving to the created user
+   * @throws {AppError} When organization not found or attempting to create another owner
+   */
+  async addUser(
+    organizationId: string,
+    userData: {
+      email: string;
+      password?: string;
+      fullName?: string;
+      role?: UserRole;
+    },
+  ): Promise<User> {
+    // Verify organization exists
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+    });
+
+    if (!organization) {
+      throw new AppError('Organization not found', 404);
+    }
+
+    // Prevent creating another owner
+    if (userData.role === UserRole.OWNER) {
+      throw new AppError('Organization can only have one owner', 400);
+    }
+
+    // Create user
+    const userService = new UserService();
+    return userService.createUser({
+      ...userData,
+      organizationId,
+      role: userData.role || UserRole.MEMBER,
+    });
+  }
+
+  /**
+   * Remove a user from an organization (soft delete)
+   * @param organizationId - ID of the organization
+   * @param userId - ID of the user to remove
+   * @throws {AppError} When user not found in organization or attempting to remove owner
+   */
+  async removeUser(organizationId: string, userId: string): Promise<void> {
+    const user = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        organizationId: organizationId,
+      },
+    });
+
+    if (!user) {
+      throw new AppError('User not found in organization', 404);
+    }
+
+    // Prevent removing the owner
+    if (user.role === UserRole.OWNER) {
+      throw new AppError('Cannot remove organization owner', 400);
+    }
+
+    // Soft delete the user
+    const userService = new UserService();
+    await userService.deleteUser(userId);
+  }
+}
+
+/**
+ * Helper function to hash passwords using bcrypt
+ * @param password - Plain text password to hash
+ * @returns Promise resolving to hashed password
+ */
+async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 12);
 }

@@ -148,3 +148,17 @@ data/
 # Ignore asset and receipt data
 /data/
 
+# Docker volumes and data
+postgres_data/
+redis_data/
+uploads/
+backups/
+
+# Docker override files
+docker-compose.override.yml
+docker-compose.*.override.yml
+
+# Local environment files
+.env.production
+.env.development
+
