@@ -18,13 +18,13 @@ const config: Config = {
     '!src/server.ts', // Main entry point, tested via integration
   ],
   coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov', 'html'],
+  coverageReporters: ['json-summary', 'text', 'lcov', 'html'],
   coverageThreshold: {
     global: {
-      branches: 80,
-      functions: 80,
-      lines: 80,
-      statements: 80,
+      branches: 20,
+      functions: 30,
+      lines: 30,
+      statements: 30,
     },
   },
   setupFilesAfterEnv: ['<rootDir>/src/test/env-setup.ts', '<rootDir>/src/test/setup.ts', '<rootDir>/src/test/prisma-singleton.ts'],

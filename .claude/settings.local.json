@@ -52,7 +52,15 @@
       "Bash(npx playwright install:*)",
       "Bash(npx playwright test:*)",
       "mcp__zen__thinkdeep",
-      "Bash(docker-compose:*)"
+      "Bash(docker-compose:*)",
+      "Bash(gh pr create:*)",
+      "Bash(mv:*)",
+      "Bash(npm ls:*)",
+      "Bash(docker:*)",
+      "Bash(NODE_ENV=test npx dotenv -e .env.test -- prisma migrate deploy)",
+      "Bash(DATABASE_URL=\"postgresql://testuser:testpass@localhost:5432/asset_manager_test?schema=public\" npx prisma migrate deploy)",
+      "mcp__zen__debug",
+      "mcp__zen__codereview"
     ],
     "deny": []
   }

@@ -3,6 +3,13 @@ import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globa
 // Override the global crypto mock for this test
 jest.unmock('crypto');
 
+// Mock dependencies before imports
+jest.mock('jsonwebtoken');
+jest.mock('qrcode');
+jest.mock('../../../middleware/security', () => ({
+  validateJWTStructure: jest.fn().mockReturnValue(true),
+}));
+
 import {
   generateTokens,
   verifyAccessToken,
@@ -10,22 +17,11 @@ import {
   generateQRCode,
 } from '../../../utils/auth';
 import { config } from '../../../config';
-
-// Mock dependencies
-jest.mock('jsonwebtoken');
-jest.mock('qrcode', () => ({
-  toDataURL: jest.fn(),
-}));
-jest.mock('../../../middleware/security', () => ({
-  validateJWTStructure: jest.fn().mockReturnValue(true),
-}));
-
-// Import the actual modules to get proper types
 import jwt from 'jsonwebtoken';
 import qrcode from 'qrcode';
 
-const mockJwt = jwt as jest.Mocked<typeof jwt>;
-const mockQRCode = qrcode as any;
+const mockJwt = jest.mocked(jwt);
+const mockQRCode = jest.mocked(qrcode);
 
 describe('Auth Utils', () => {
   beforeEach(() => {
@@ -302,7 +298,7 @@ describe('Auth Utils', () => {
       const otpauthUrl = 'otpauth://totp/test@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Test';
       const expectedDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...';
 
-      mockQRCode.toDataURL.mockResolvedValue(expectedDataUrl);
+      (mockQRCode.toDataURL as jest.Mock<any>).mockResolvedValue(expectedDataUrl);
 
       const result = await generateQRCode(otpauthUrl);
 
@@ -314,7 +310,7 @@ describe('Auth Utils', () => {
       const otpauthUrl = 'invalid-otpauth-url';
       const error = new Error('Invalid URL format');
 
-      mockQRCode.toDataURL.mockRejectedValue(error);
+      (mockQRCode.toDataURL as jest.Mock<any>).mockRejectedValue(error);
 
       await expect(generateQRCode(otpauthUrl)).rejects.toThrow('Invalid URL format');
     });
@@ -322,7 +318,7 @@ describe('Auth Utils', () => {
     test('should call toDataURL with correct URL', async () => {
       const otpauthUrl = 'otpauth://totp/test@example.com?secret=TEST&issuer=App';
 
-      mockQRCode.toDataURL.mockResolvedValue('mock-data-url');
+      (mockQRCode.toDataURL as jest.Mock<any>).mockResolvedValue('mock-data-url');
 
       await generateQRCode(otpauthUrl);
 
@@ -334,7 +330,7 @@ describe('Auth Utils', () => {
         'otpauth://totp/My%20App%3Auser%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=My%20App';
       const dataUrl = 'data:image/png;base64,mockdata';
 
-      mockQRCode.toDataURL.mockResolvedValue(dataUrl);
+      (mockQRCode.toDataURL as jest.Mock<any>).mockResolvedValue(dataUrl);
 
       const result = await generateQRCode(otpauthUrl);
 

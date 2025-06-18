@@ -10,4 +10,10 @@ export default {
     '<rootDir>/src/test/prisma-singleton.ts', // Mock setup BEFORE general setup
     '<rootDir>/src/test/setup.ts'
   ],
+  // Add mocks for unit tests only
+  moduleNameMapper: {
+    ...baseConfig.moduleNameMapper,
+    '^jsonwebtoken$': '<rootDir>/__mocks__/jsonwebtoken.js',
+    '^qrcode$': '<rootDir>/__mocks__/qrcode.js',
+  },
 };
