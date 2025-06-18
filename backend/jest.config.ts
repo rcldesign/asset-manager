@@ -27,7 +27,7 @@ const config: Config = {
       statements: 80,
     },
   },
-  setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts', '<rootDir>/src/test/prisma-singleton.ts'],
+  setupFilesAfterEnv: ['<rootDir>/src/test/env-setup.ts', '<rootDir>/src/test/setup.ts', '<rootDir>/src/test/prisma-singleton.ts'],
   testTimeout: 10000,
   clearMocks: true,
   restoreMocks: true,
@@ -36,6 +36,8 @@ const config: Config = {
   },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^openid-client$': '<rootDir>/__mocks__/openid-client.js',
+    '^speakeasy$': '<rootDir>/__mocks__/speakeasy.js',
   },
   testPathIgnorePatterns: [
     '<rootDir>/node_modules/',

@@ -2,6 +2,9 @@ import express, { type Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 
+// We no longer use jest.mock for speakeasy - instead we use jest.spyOn in individual tests
+// This avoids the complexity of mocking functions that have both callable and property aspects
+
 // Mock OIDC service before importing routes
 jest.mock('../../services/oidc.service', () => ({
   OIDCService: {
@@ -37,7 +40,6 @@ export function createTestApp(): Application {
   app.use(helmet());
   app.use(cors());
   app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true }));
 
   // Health check endpoint
   app.get('/health', (_req, res) => {
@@ -86,8 +88,8 @@ export function setupTestEnvironment(): void {
   // Ensure test environment
   process.env.NODE_ENV = 'test';
 
-  // Database configuration
-  process.env.DATABASE_URL = 'file:./test.db';
+  // Database configuration - use PostgreSQL from .env.test
+  // Don't override DATABASE_URL here - it should come from .env.test
   process.env.USE_EMBEDDED_DB = 'false';
 
   // JWT secrets
@@ -113,6 +115,9 @@ export function setupTestEnvironment(): void {
   // File upload configuration
   process.env.UPLOAD_DIR = './test-uploads';
   process.env.MAX_FILE_SIZE = '10485760'; // 10MB
+
+  // Disable rate limiting in tests
+  process.env.DISABLE_RATE_LIMITING = 'true';
 }
 
 /**

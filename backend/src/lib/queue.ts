@@ -175,7 +175,9 @@ allQueueEvents.forEach((queueEvents, index) => {
   queueEvents.on('progress', ({ jobId, data }: { jobId: string; data: unknown }) => {
     logger.debug(
       `Job ${jobId} progress in queue ${queueName}:`,
-      typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : { progress: data },
+      typeof data === 'object' && data !== null
+        ? (data as Record<string, unknown>)
+        : { progress: data },
     );
   });
 });

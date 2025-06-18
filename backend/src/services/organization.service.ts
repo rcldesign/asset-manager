@@ -210,10 +210,12 @@ export class OrganizationService {
    */
   async getStatistics(id: string): Promise<{
     totalUsers: number;
+    activeUsers: number;
     totalAssets: number;
     totalTasks: number;
     tasksByStatus: Record<string, number>;
     usersByRole: Record<string, number>;
+    organizationAge: number;
   }> {
     const organization = await prisma.organization.findUnique({
       where: { id },
@@ -223,24 +225,32 @@ export class OrganizationService {
       throw new AppError('Organization not found', 404);
     }
 
-    const [totalUsers, totalAssets, totalTasks, tasksByStatus, usersByRole] = await Promise.all([
-      prisma.user.count({ where: { organizationId: id } }),
-      prisma.asset.count({ where: { organizationId: id } }),
-      prisma.task.count({ where: { organizationId: id } }),
-      prisma.task.groupBy({
-        by: ['status'],
-        where: { organizationId: id },
-        _count: true,
-      }),
-      prisma.user.groupBy({
-        by: ['role'],
-        where: { organizationId: id },
-        _count: true,
-      }),
-    ]);
+    const [totalUsers, activeUsers, totalAssets, totalTasks, tasksByStatus, usersByRole] =
+      await Promise.all([
+        prisma.user.count({ where: { organizationId: id } }),
+        prisma.user.count({ where: { organizationId: id, isActive: true } }),
+        prisma.asset.count({ where: { organizationId: id } }),
+        prisma.task.count({ where: { organizationId: id } }),
+        prisma.task.groupBy({
+          by: ['status'],
+          where: { organizationId: id },
+          _count: true,
+        }),
+        prisma.user.groupBy({
+          by: ['role'],
+          where: { organizationId: id },
+          _count: true,
+        }),
+      ]);
+
+    // Calculate organization age in days
+    const organizationAge = Math.floor(
+      (Date.now() - organization.createdAt.getTime()) / (1000 * 60 * 60 * 24),
+    );
 
     return {
       totalUsers,
+      activeUsers,
       totalAssets,
       totalTasks,
       tasksByStatus: tasksByStatus.reduce(
@@ -257,6 +267,7 @@ export class OrganizationService {
         },
         {} as Record<string, number>,
       ),
+      organizationAge,
     };
   }
 

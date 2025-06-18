@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from '@jest/globals';
-import { OrganizationService } from '../../../services/organization.service';
 import { UserRole } from '@prisma/client';
 import { prismaMock } from '../../prisma-singleton';
+import { OrganizationService } from '../../../services/organization.service';
 
 describe('OrganizationService', () => {
   let organizationService: OrganizationService;
@@ -318,7 +318,9 @@ describe('OrganizationService', () => {
       ];
 
       prismaMock.organization.findUnique.mockResolvedValue(organization);
-      prismaMock.user.count.mockResolvedValue(10);
+      prismaMock.user.count
+        .mockResolvedValueOnce(10) // totalUsers
+        .mockResolvedValueOnce(8); // activeUsers
       prismaMock.asset.count.mockResolvedValue(20);
       prismaMock.task.count.mockResolvedValue(8);
       (prismaMock.task.groupBy as jest.MockedFunction<any>).mockResolvedValue(tasksByStatus);
@@ -328,6 +330,7 @@ describe('OrganizationService', () => {
 
       expect(result).toEqual({
         totalUsers: 10,
+        activeUsers: 8,
         totalAssets: 20,
         totalTasks: 8,
         tasksByStatus: {
@@ -338,6 +341,7 @@ describe('OrganizationService', () => {
           OWNER: 1,
           MEMBER: 4,
         },
+        organizationAge: 0, // Since organization was created recently in test
       });
     });
 

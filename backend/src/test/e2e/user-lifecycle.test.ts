@@ -1,47 +1,155 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import type { Application } from 'express';
+import Redis from 'ioredis';
+import * as speakeasy from 'speakeasy';
+
 import {
   createTestApp,
   setupTestDatabase,
   cleanupTestDatabase,
+  setupTestEnvironment,
   testDataGenerators,
 } from '../integration/app.setup';
 import type { TestDatabaseHelper } from '../helpers';
 import { TestAPIHelper } from '../helpers';
+import {
+  _test_only_resetFailedAttempts,
+  _test_only_stopCleanupInterval,
+} from '../../middleware/auth';
+import { _test_only_stopOidcCleanupInterval } from '../../routes/oidc';
+
+// Test response types
+interface TestUser {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  emailVerified: boolean;
+  totpEnabled: boolean;
+  isActive: boolean;
+}
+
+interface TestOrganization {
+  id: string;
+  name: string;
+}
+
+interface TestTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
+interface RegisterResponse {
+  user: TestUser;
+  organization: TestOrganization;
+  tokens: TestTokens;
+}
+
+interface SetupTwoFAResponse {
+  secret: string;
+  qrCode: string;
+  manualEntryKey: string;
+  message: string;
+}
+
+// interface LoginWithTwoFAResponse {
+//   requiresTwoFactor?: boolean;
+//   message?: string;
+//   user?: TestUser;
+//   tokens?: TestTokens;
+// }
+
+interface ApiTokenResponse {
+  id: string;
+  name: string;
+  token: string;
+  expiresAt?: string;
+}
+
+interface ListTokensResponse {
+  tokens: Array<{
+    id: string;
+    name: string;
+    expiresAt?: string;
+  }>;
+}
+
+interface MessageResponse {
+  message: string;
+}
+
+interface MembersResponse {
+  members: Array<{
+    id: string;
+    role: string;
+    email?: string;
+    fullName?: string;
+  }>;
+}
+
+interface OrganizationStatsResponse {
+  totalUsers: number;
+  activeUsers: number;
+  usersByRole: Record<string, number>;
+  organizationAge: number;
+}
 
 describe('E2E: Complete User Lifecycle', () => {
   let app: Application;
   let api: TestAPIHelper;
   let dbHelper: TestDatabaseHelper;
+  let redisClient: Redis;
 
   beforeAll(async () => {
+    setupTestEnvironment();
     app = createTestApp();
-    api = new TestAPIHelper(app);
     dbHelper = await setupTestDatabase();
+
+    // Connect to Redis for cleanup
+    redisClient = new Redis(process.env.REDIS_URL || 'redis://localhost:6379/1');
   });
 
   afterAll(async () => {
     await cleanupTestDatabase(dbHelper);
+    // Disconnect from Redis
+    if (redisClient) {
+      await redisClient.quit();
+    }
+    _test_only_stopCleanupInterval(); // Stop the auth cleanup timer
+    _test_only_stopOidcCleanupInterval(); // Stop the OIDC cleanup timer
   });
 
   beforeEach(async () => {
+    jest.clearAllMocks(); // Reset all mock state between tests
+
+    api = new TestAPIHelper(app); // Re-create the helper for each test
     await dbHelper.clearDatabase();
+    // Flush Redis to ensure test isolation
+    await redisClient.flushdb();
+    _test_only_resetFailedAttempts(); // Reset the rate-limiter state
+  });
+
+  afterEach(() => {
+    // Mock cleanup is handled by jest.clearAllMocks() in beforeEach
   });
 
   test('Complete user registration and authentication flow', async () => {
     const userData = testDataGenerators.validUser();
 
     // Step 1: Register new user
-    const registerResponse = await api.request
-      .post('/api/auth/register')
-      .send(userData)
-      .expect(201);
+    const registerResponse = await api.request.post('/api/auth/register').send(userData);
+
+    if (registerResponse.status !== 201) {
+      console.error('Registration failed:', registerResponse.body);
+    }
+
+    expect(registerResponse.status).toBe(201);
 
     expect(registerResponse.body).toHaveProperty('user');
     expect(registerResponse.body).toHaveProperty('organization');
     expect(registerResponse.body).toHaveProperty('tokens');
 
-    const { user, organization, tokens } = registerResponse.body;
+    const { user, organization, tokens } = registerResponse.body as RegisterResponse;
 
     // Verify user properties
     expect(user.email).toBe(userData.email);
@@ -64,8 +172,9 @@ describe('E2E: Complete User Lifecycle', () => {
       .get('/api/auth/me')
       .expect(200);
 
-    expect(profileResponse.body.id).toBe(user.id);
-    expect(profileResponse.body.email).toBe(user.email);
+    const profileData = profileResponse.body as TestUser;
+    expect(profileData.id).toBe(user.id);
+    expect(profileData.email).toBe(user.email);
 
     // Step 3: Login with credentials
     const loginResponse = await api.request
@@ -76,9 +185,10 @@ describe('E2E: Complete User Lifecycle', () => {
       })
       .expect(200);
 
-    expect(loginResponse.body).toHaveProperty('user');
-    expect(loginResponse.body).toHaveProperty('tokens');
-    expect(loginResponse.body.user.id).toBe(user.id);
+    const loginData = loginResponse.body as { user: TestUser; tokens: TestTokens };
+    expect(loginData).toHaveProperty('user');
+    expect(loginData).toHaveProperty('tokens');
+    expect(loginData.user.id).toBe(user.id);
 
     // Step 4: Refresh tokens
     const refreshResponse = await api.request
@@ -86,9 +196,10 @@ describe('E2E: Complete User Lifecycle', () => {
       .send({ refreshToken: tokens.refreshToken })
       .expect(200);
 
-    expect(refreshResponse.body).toHaveProperty('tokens');
-    expect(refreshResponse.body.tokens.accessToken).toBeTruthy();
-    expect(refreshResponse.body.tokens.refreshToken).toBeTruthy();
+    const refreshData = refreshResponse.body as { tokens: TestTokens };
+    expect(refreshData).toHaveProperty('tokens');
+    expect(refreshData.tokens.accessToken).toBeTruthy();
+    expect(refreshData.tokens.refreshToken).toBeTruthy();
 
     // Step 5: Change password
     const newPassword = 'NewTestPassword789!';
@@ -101,7 +212,8 @@ describe('E2E: Complete User Lifecycle', () => {
       })
       .expect(200);
 
-    expect(changePasswordResponse.body.message).toBeTruthy();
+    const changePasswordData = changePasswordResponse.body as MessageResponse;
+    expect(changePasswordData.message).toBeTruthy();
 
     // Step 6: Login with new password
     const newLoginResponse = await api.request
@@ -120,7 +232,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .post('/api/auth/logout')
       .expect(200);
 
-    expect(logoutResponse.body.message).toBeTruthy();
+    const logoutData = logoutResponse.body as MessageResponse;
+    expect(logoutData.message).toBeTruthy();
   });
 
   test('Complete 2FA setup and authentication flow', async () => {
@@ -132,7 +245,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .send(userData)
       .expect(201);
 
-    const { accessToken } = registerResponse.body.tokens;
+    const registerData = registerResponse.body as RegisterResponse;
+    const { accessToken } = registerData.tokens;
 
     // Step 2: Setup 2FA
     const setup2FAResponse = await api
@@ -145,14 +259,25 @@ describe('E2E: Complete User Lifecycle', () => {
     expect(setup2FAResponse.body).toHaveProperty('manualEntryKey');
     expect(setup2FAResponse.body).toHaveProperty('message');
 
-    // Step 3: Enable 2FA (simulate valid TOTP token)
+    const setup2FAData = setup2FAResponse.body as SetupTwoFAResponse;
+    const { secret } = setup2FAData;
+
+    // Step 3: Enable 2FA with real TOTP token
+    const currentTimeSeconds1 = Math.floor(Date.now() / 1000);
     const enable2FAResponse = await api
       .authenticatedRequest(accessToken)
       .post('/api/auth/2fa/enable')
-      .send({ totpToken: '123456' })
+      .send({
+        totpToken: speakeasy.totp({
+          secret,
+          encoding: 'base32',
+          time: currentTimeSeconds1,
+        }),
+      })
       .expect(200);
 
-    expect(enable2FAResponse.body.message).toBeTruthy();
+    const enable2FAData = enable2FAResponse.body as MessageResponse;
+    expect(enable2FAData.message).toBeTruthy();
 
     // Step 4: Login without 2FA token - should require 2FA
     const loginWithout2FAResponse = await api.request
@@ -168,12 +293,17 @@ describe('E2E: Complete User Lifecycle', () => {
     expect(loginWithout2FAResponse.body).not.toHaveProperty('tokens');
 
     // Step 5: Login with 2FA token
+    const currentTimeSeconds2 = Math.floor(Date.now() / 1000);
     const loginWith2FAResponse = await api.request
       .post('/api/auth/login')
       .send({
         email: userData.email,
         password: userData.password,
-        totpToken: '123456',
+        totpToken: speakeasy.totp({
+          secret,
+          encoding: 'base32',
+          time: currentTimeSeconds2,
+        }),
       })
       .expect(200);
 
@@ -182,13 +312,21 @@ describe('E2E: Complete User Lifecycle', () => {
     expect(loginWith2FAResponse.body).not.toHaveProperty('requiresTwoFactor');
 
     // Step 6: Disable 2FA
+    const currentTimeSeconds3 = Math.floor(Date.now() / 1000);
     const disable2FAResponse = await api
       .authenticatedRequest(accessToken)
       .post('/api/auth/2fa/disable')
-      .send({ totpToken: '123456' })
+      .send({
+        totpToken: speakeasy.totp({
+          secret,
+          encoding: 'base32',
+          time: currentTimeSeconds3,
+        }),
+      })
       .expect(200);
 
-    expect(disable2FAResponse.body.message).toBeTruthy();
+    const disable2FAData = disable2FAResponse.body as MessageResponse;
+    expect(disable2FAData.message).toBeTruthy();
 
     // Step 7: Login without 2FA token - should work now
     const finalLoginResponse = await api.request
@@ -212,7 +350,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .send(userData)
       .expect(201);
 
-    const { accessToken } = registerResponse.body.tokens;
+    const registerData2 = registerResponse.body as RegisterResponse;
+    const { accessToken } = registerData2.tokens;
 
     // Step 2: Create API token
     const tokenData = testDataGenerators.validApiToken();
@@ -222,17 +361,18 @@ describe('E2E: Complete User Lifecycle', () => {
       .send(tokenData)
       .expect(201);
 
-    expect(createTokenResponse.body).toHaveProperty('id');
-    expect(createTokenResponse.body).toHaveProperty('name');
-    expect(createTokenResponse.body).toHaveProperty('token');
-    expect(createTokenResponse.body.name).toBe(tokenData.name);
-
-    const { id: tokenId, token: apiToken } = createTokenResponse.body;
+    const createTokenData = createTokenResponse.body as ApiTokenResponse;
+    expect(createTokenData).toHaveProperty('id');
+    expect(createTokenData).toHaveProperty('name');
+    expect(createTokenData).toHaveProperty('token');
+    expect(createTokenData.name).toBe(tokenData.name);
+    const { id: tokenId, token: apiToken } = createTokenData;
 
     // Step 3: Use API token to authenticate
     const apiAuthResponse = await api.apiTokenRequest(apiToken).get('/api/auth/me').expect(200);
 
-    expect(apiAuthResponse.body.email).toBe(userData.email);
+    const apiAuthData = apiAuthResponse.body as TestUser;
+    expect(apiAuthData.email).toBe(userData.email);
 
     // Step 4: List API tokens
     const listTokensResponse = await api
@@ -240,11 +380,12 @@ describe('E2E: Complete User Lifecycle', () => {
       .get('/api/auth/tokens')
       .expect(200);
 
-    expect(listTokensResponse.body).toHaveProperty('tokens');
-    expect(listTokensResponse.body.tokens).toHaveLength(1);
-    expect(listTokensResponse.body.tokens[0].id).toBe(tokenId);
-    expect(listTokensResponse.body.tokens[0].name).toBe(tokenData.name);
-    expect(listTokensResponse.body.tokens[0]).not.toHaveProperty('token'); // Token value not in list
+    const listTokensData = listTokensResponse.body as ListTokensResponse;
+    expect(listTokensData).toHaveProperty('tokens');
+    expect(listTokensData.tokens).toHaveLength(1);
+    expect(listTokensData.tokens[0]!.id).toBe(tokenId);
+    expect(listTokensData.tokens[0]!.name).toBe(tokenData.name);
+    expect(listTokensData.tokens[0]).not.toHaveProperty('token'); // Token value not in list
 
     // Step 5: Create another API token with expiration
     const expiringTokenData = {
@@ -258,7 +399,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .send(expiringTokenData)
       .expect(201);
 
-    expect(createExpiringTokenResponse.body.expiresAt).toBeTruthy();
+    const createExpiringTokenData = createExpiringTokenResponse.body as ApiTokenResponse;
+    expect(createExpiringTokenData.expiresAt).toBeTruthy();
 
     // Step 6: List tokens again - should have 2
     const listTokensResponse2 = await api
@@ -266,7 +408,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .get('/api/auth/tokens')
       .expect(200);
 
-    expect(listTokensResponse2.body.tokens).toHaveLength(2);
+    const listTokensData2 = listTokensResponse2.body as ListTokensResponse;
+    expect(listTokensData2.tokens).toHaveLength(2);
 
     // Step 7: Delete first API token
     const deleteTokenResponse = await api
@@ -274,7 +417,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .delete(`/api/auth/tokens/${tokenId}`)
       .expect(200);
 
-    expect(deleteTokenResponse.body.message).toBeTruthy();
+    const deleteTokenData = deleteTokenResponse.body as MessageResponse;
+    expect(deleteTokenData.message).toBeTruthy();
 
     // Step 8: Verify API token no longer works
     await api.apiTokenRequest(apiToken).get('/api/auth/me').expect(401);
@@ -285,8 +429,9 @@ describe('E2E: Complete User Lifecycle', () => {
       .get('/api/auth/tokens')
       .expect(200);
 
-    expect(finalListResponse.body.tokens).toHaveLength(1);
-    expect(finalListResponse.body.tokens[0].id).not.toBe(tokenId);
+    const finalListData = finalListResponse.body as ListTokensResponse;
+    expect(finalListData.tokens).toHaveLength(1);
+    expect(finalListData.tokens[0]!.id).not.toBe(tokenId);
   });
 
   test('Organization management by owner', async () => {
@@ -298,7 +443,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .send(userData)
       .expect(201);
 
-    const { user, organization, tokens } = registerResponse.body;
+    const orgRegisterData = registerResponse.body as RegisterResponse;
+    const { user, organization, tokens } = orgRegisterData;
 
     // Step 2: Get organization details
     const orgResponse = await api
@@ -306,8 +452,9 @@ describe('E2E: Complete User Lifecycle', () => {
       .get('/api/organizations/me')
       .expect(200);
 
-    expect(orgResponse.body.id).toBe(organization.id);
-    expect(orgResponse.body.name).toBe(organization.name);
+    const orgData = orgResponse.body as TestOrganization;
+    expect(orgData.id).toBe(organization.id);
+    expect(orgData.name).toBe(organization.name);
 
     // Step 3: Update organization name
     const newOrgName = `Updated ${userData.organizationName}`;
@@ -317,7 +464,8 @@ describe('E2E: Complete User Lifecycle', () => {
       .send({ name: newOrgName })
       .expect(200);
 
-    expect(updateOrgResponse.body.name).toBe(newOrgName);
+    const updateOrgData = updateOrgResponse.body as TestOrganization;
+    expect(updateOrgData.name).toBe(newOrgName);
 
     // Step 4: Get organization members
     const membersResponse = await api
@@ -325,10 +473,11 @@ describe('E2E: Complete User Lifecycle', () => {
       .get(`/api/organizations/${organization.id}/members`)
       .expect(200);
 
-    expect(membersResponse.body).toHaveProperty('members');
-    expect(membersResponse.body.members).toHaveLength(1);
-    expect(membersResponse.body.members[0].id).toBe(user.id);
-    expect(membersResponse.body.members[0].role).toBe('OWNER');
+    const membersData = membersResponse.body as MembersResponse;
+    expect(membersData).toHaveProperty('members');
+    expect(membersData.members).toHaveLength(1);
+    expect(membersData.members[0]!.id).toBe(user.id);
+    expect(membersData.members[0]!.role).toBe('OWNER');
 
     // Step 5: Get organization statistics
     const statsResponse = await api
@@ -336,11 +485,12 @@ describe('E2E: Complete User Lifecycle', () => {
       .get(`/api/organizations/${organization.id}/statistics`)
       .expect(200);
 
-    expect(statsResponse.body).toHaveProperty('totalUsers', 1);
-    expect(statsResponse.body).toHaveProperty('activeUsers', 1);
-    expect(statsResponse.body).toHaveProperty('usersByRole');
-    expect(statsResponse.body.usersByRole.OWNER).toBe(1);
-    expect(statsResponse.body).toHaveProperty('organizationAge');
+    const statsData = statsResponse.body as OrganizationStatsResponse;
+    expect(statsData).toHaveProperty('totalUsers', 1);
+    expect(statsData).toHaveProperty('activeUsers', 1);
+    expect(statsData).toHaveProperty('usersByRole');
+    expect(statsData.usersByRole['OWNER']).toBe(1);
+    expect(statsData).toHaveProperty('organizationAge');
   });
 
   test('Error handling throughout user flows', async () => {
@@ -351,7 +501,7 @@ describe('E2E: Complete User Lifecycle', () => {
     await api.request
       .post('/api/auth/login')
       .send({ email: 'nonexistent@example.com', password: 'password' })
-      .expect(400);
+      .expect(401);
 
     // Test accessing protected endpoint without token
     await api.request.get('/api/auth/me').expect(401);
@@ -360,13 +510,14 @@ describe('E2E: Complete User Lifecycle', () => {
     await api.request.get('/api/auth/me').set('Authorization', 'Bearer invalid-token').expect(401);
 
     // Test refresh with invalid token
-    await api.request.post('/api/auth/refresh').send({ refreshToken: 'invalid-token' }).expect(400);
+    await api.request.post('/api/auth/refresh').send({ refreshToken: 'invalid-token' }).expect(401);
 
     // Register a valid user for remaining tests
     const userData = testDataGenerators.validUser();
     const registerResponse = await api.request.post('/api/auth/register').send(userData);
 
-    const { accessToken } = registerResponse.body.tokens;
+    const errorRegisterData = registerResponse.body as RegisterResponse;
+    const { accessToken } = errorRegisterData.tokens;
 
     // Test password change with wrong current password
     await api

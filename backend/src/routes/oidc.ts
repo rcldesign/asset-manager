@@ -32,7 +32,7 @@ const sessionStore = new Map<
 >();
 
 // Clean up expired sessions (older than 10 minutes)
-setInterval(
+const cleanupInterval = setInterval(
   () => {
     const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
     for (const [key, session] of sessionStore.entries()) {
@@ -43,6 +43,11 @@ setInterval(
   },
   5 * 60 * 1000,
 ); // Run every 5 minutes
+
+// Export for testing purposes to stop the interval timer
+export const _test_only_stopOidcCleanupInterval = (): void => {
+  clearInterval(cleanupInterval);
+};
 
 /**
  * Check if OIDC is available
@@ -153,7 +158,7 @@ router.get(
       });
 
       // Check if user already exists
-      const existingUser = await userService.getUserByEmail(oidcUserInfo.email || '');
+      const existingUser = await userService.findByEmail(oidcUserInfo.email || '');
       let organization;
       let user;
 

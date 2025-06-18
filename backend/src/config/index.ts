@@ -1,4 +1,4 @@
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 import { z } from 'zod';
 
 /**
@@ -43,7 +43,20 @@ const envSchema = z.object({
   SESSION_MAX_AGE: z.string().default('86400000').transform(Number), // 24 hours
 
   // CORS
-  ALLOWED_ORIGINS: z.string().default('*'),
+  ALLOWED_ORIGINS: z.string().refine(
+    (val) => {
+      // Allow '*' in non-production environments for backward compatibility
+      const env = process.env.NODE_ENV;
+      if (env !== 'production' && val === '*') {
+        return true;
+      }
+      return val !== '*';
+    },
+    {
+      message:
+        "Using '*' for ALLOWED_ORIGINS is not permitted in production. Please provide a comma-separated list of allowed origins.",
+    },
+  ),
 
   // File Upload
   UPLOAD_DIR: z.string().default('./uploads'),

@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 
 import { config } from './config';
 import { logger } from './utils/logger';
-import { errorHandler } from './middleware/error-handler';
+import { errorHandler } from './middleware/errorHandler';
 import { prisma } from './lib/prisma';
 import { connectRedis, disconnectRedis } from './lib/redis';
 import { closeQueues } from './lib/queue';
@@ -53,16 +53,18 @@ app.use(
   }),
 );
 
-// Rate limiting
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many API requests, please try again later.',
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-});
+// Rate limiting (disabled in test environment)
+if (process.env.DISABLE_RATE_LIMITING !== 'true') {
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: 'Too many API requests, please try again later.',
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
 
-app.use('/api/', apiLimiter);
+  app.use('/api/', apiLimiter);
+}
 
 // API documentation (only in development and test environments)
 if (!config.isProduction) {
@@ -151,15 +153,15 @@ app.use('/api/oidc', oidcRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/organizations', organizationRoutes);
 
-// 404 handler
-app.use((_req, res) => {
-  res.status(404).json({
-    error: {
-      code: 'NOT_FOUND',
-      message: 'Route not found',
-      timestamp: new Date().toISOString(),
-    },
-  });
+// 404 handler - creates error and passes to error handler
+app.use((req, _res, next) => {
+  interface ErrorWithStatusCode extends Error {
+    statusCode?: number;
+  }
+  const error: ErrorWithStatusCode = new Error(`Route not found: ${req.method} ${req.originalUrl}`);
+  error.name = 'NotFoundError';
+  error.statusCode = 404;
+  next(error);
 });
 
 // Error handling middleware (must be last)

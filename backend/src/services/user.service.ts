@@ -1,5 +1,6 @@
 import type { User, UserRole, Prisma } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { createHash } from 'crypto';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errors';
 import { generateSecureToken } from '../utils/crypto';
@@ -80,13 +81,6 @@ export class UserService {
         organization: true,
       },
     });
-  }
-
-  /**
-   * Get user by email - alias for findByEmail
-   */
-  async getUserByEmail(email: string): Promise<User | null> {
-    return this.findByEmail(email);
   }
 
   /**
@@ -244,7 +238,7 @@ export class UserService {
     // Verify current password
     const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isValid) {
-      throw new AppError('Current password is incorrect', 401);
+      throw new AppError('Current password is incorrect', 400);
     }
 
     // Hash new password
@@ -264,6 +258,7 @@ export class UserService {
     email: string,
     password: string,
     totpToken?: string,
+    timeForTesting?: number,
   ): Promise<{ user: User; requiresTwoFactor: boolean } | null> {
     const user = await this.verifyPassword(email, password);
     if (!user) {
@@ -281,7 +276,7 @@ export class UserService {
         throw new AppError('2FA is enabled but no secret found. Please contact support.', 500);
       }
 
-      const isValidToken = verifyTOTPToken(totpToken, user.totpSecret);
+      const isValidToken = verifyTOTPToken(totpToken, user.totpSecret, timeForTesting);
       if (!isValidToken) {
         return null; // Invalid 2FA token - authentication fails
       }
@@ -372,7 +367,7 @@ export class UserService {
   /**
    * Enable two-factor authentication
    */
-  async enableTwoFactor(userId: string, totpToken: string): Promise<void> {
+  async enableTwoFactor(userId: string, totpToken: string, timeForTesting?: number): Promise<void> {
     // Get the user and their temporary TOTP secret
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -387,7 +382,7 @@ export class UserService {
     }
 
     // Verify the provided TOTP token
-    const isValidToken = verifyTOTPToken(totpToken, user.totpSecret);
+    const isValidToken = verifyTOTPToken(totpToken, user.totpSecret, timeForTesting);
     if (!isValidToken) {
       throw new AppError('Invalid TOTP token', 400);
     }
@@ -402,7 +397,11 @@ export class UserService {
   /**
    * Disable two-factor authentication
    */
-  async disableTwoFactor(userId: string, totpToken: string): Promise<void> {
+  async disableTwoFactor(
+    userId: string,
+    totpToken: string,
+    timeForTesting?: number,
+  ): Promise<void> {
     // Get the user and their TOTP secret
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -417,7 +416,7 @@ export class UserService {
     }
 
     // Verify the provided TOTP token
-    const isValidToken = verifyTOTPToken(totpToken, user.totpSecret);
+    const isValidToken = verifyTOTPToken(totpToken, user.totpSecret, timeForTesting);
     if (!isValidToken) {
       throw new AppError('Invalid TOTP token', 400);
     }
@@ -449,7 +448,7 @@ export class UserService {
     userId: string,
     data: { name: string; expiresAt?: Date },
     requesterContext?: PermissionContext,
-  ): Promise<{ token: string; id: string; name: string; expiresAt?: Date }> {
+  ): Promise<{ token: string; id: string; name: string; expiresAt?: Date; createdAt: Date }> {
     // Permission check if context provided
     if (requesterContext) {
       const context = {
@@ -466,13 +465,15 @@ export class UserService {
     }
 
     const token = generateSecureToken(32);
-    const hashedToken = await bcrypt.hash(token, 10);
+    const hashedToken = createHash('sha256').update(token).digest('hex');
+    const tokenPrefix = token.substring(0, 8);
 
     const apiToken = await prisma.apiToken.create({
       data: {
         userId,
         name: data.name,
         token: hashedToken,
+        tokenPrefix,
         expiresAt: data.expiresAt,
       },
     });
@@ -482,6 +483,7 @@ export class UserService {
       id: apiToken.id,
       name: data.name,
       expiresAt: data.expiresAt,
+      createdAt: apiToken.createdAt,
     };
   }
 
@@ -490,13 +492,15 @@ export class UserService {
    */
   async generateApiToken(userId: string, name: string, expiresAt?: Date): Promise<string> {
     const token = generateSecureToken(32);
-    const hashedToken = await bcrypt.hash(token, 10);
+    const hashedToken = createHash('sha256').update(token).digest('hex');
+    const tokenPrefix = token.substring(0, 8);
 
     await prisma.apiToken.create({
       data: {
         userId,
         name,
         token: hashedToken,
+        tokenPrefix,
         expiresAt,
       },
     });
@@ -505,40 +509,15 @@ export class UserService {
   }
 
   /**
-   * Get user's API tokens
-   */
-  async getUserApiTokens(userId: string): Promise<
-    Array<{
-      id: string;
-      name: string;
-      lastUsed: Date | null;
-      expiresAt: Date | null;
-      createdAt: Date;
-    }>
-  > {
-    return this.listApiTokens(userId);
-  }
-
-  /**
-   * Delete API token
-   */
-  async deleteApiToken(userId: string, tokenId: string): Promise<void> {
-    return this.revokeApiToken(userId, tokenId);
-  }
-
-  /**
-   * Verify API token - alias for validateApiToken
-   */
-  async verifyApiToken(token: string): Promise<User | null> {
-    return this.validateApiToken(token);
-  }
-
-  /**
    * Validate API token
    */
   async validateApiToken(token: string): Promise<User | null> {
-    const apiTokens = await prisma.apiToken.findMany({
+    const hashedToken = createHash('sha256').update(token).digest('hex');
+
+    // First try SHA-256 hash (new method)
+    let apiToken = await prisma.apiToken.findFirst({
       where: {
+        token: hashedToken,
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       include: {
@@ -550,19 +529,76 @@ export class UserService {
       },
     });
 
-    for (const apiToken of apiTokens) {
-      const isValid = await bcrypt.compare(token, apiToken.token);
-      if (isValid) {
-        // Update last used timestamp
-        await prisma.apiToken.update({
-          where: { id: apiToken.id },
-          data: { lastUsed: new Date() },
+    // If not found, try bcrypt comparison (legacy method for backward compatibility)
+    if (!apiToken) {
+      const tokenPrefix = token.substring(0, 8);
+
+      // First try to find tokens with matching prefix (performance optimization)
+      let candidateTokens = await prisma.apiToken.findMany({
+        where: {
+          tokenPrefix,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        include: {
+          user: {
+            include: {
+              organization: true,
+            },
+          },
+        },
+      });
+
+      // If no prefix matches found, fall back to all active tokens (for tokens without prefix)
+      if (candidateTokens.length === 0) {
+        candidateTokens = await prisma.apiToken.findMany({
+          where: {
+            tokenPrefix: null, // Only check legacy tokens without prefix
+            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+          },
+          include: {
+            user: {
+              include: {
+                organization: true,
+              },
+            },
+          },
         });
-        return apiToken.user;
+      }
+
+      // Check each candidate token with bcrypt (legacy tokens)
+      for (const dbToken of candidateTokens) {
+        try {
+          const isValid = await bcrypt.compare(token, dbToken.token);
+          if (isValid) {
+            apiToken = dbToken;
+            // Automatically migrate legacy tokens to new format
+            await prisma.apiToken.update({
+              where: { id: dbToken.id },
+              data: {
+                token: hashedToken,
+                tokenPrefix: tokenPrefix,
+              },
+            });
+            break;
+          }
+        } catch {
+          // Skip invalid bcrypt hashes
+          continue;
+        }
       }
     }
 
-    return null;
+    if (!apiToken || !apiToken.user || !apiToken.user.isActive) {
+      return null;
+    }
+
+    // Update last used timestamp
+    await prisma.apiToken.update({
+      where: { id: apiToken.id },
+      data: { lastUsed: new Date() },
+    });
+
+    return apiToken.user;
   }
 
   /**
@@ -588,10 +624,21 @@ export class UserService {
       }
     }
 
-    await prisma.apiToken.deleteMany({
+    // First check if the token exists and belongs to the user
+    const existingToken = await prisma.apiToken.findUnique({
       where: {
         id: tokenId,
-        userId,
+      },
+    });
+
+    if (!existingToken || existingToken.userId !== userId) {
+      throw new AppError('API token not found', 400);
+    }
+
+    // Now delete the specific token
+    await prisma.apiToken.delete({
+      where: {
+        id: tokenId,
       },
     });
   }

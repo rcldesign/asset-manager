@@ -91,20 +91,22 @@ workers.forEach(({ name, worker }) => {
   worker.on('progress', (job: Job, progress: unknown) => {
     logger.debug(
       `Worker ${name}: Job ${job.id} progress`,
-      typeof progress === 'object' && progress !== null ? (progress as Record<string, unknown>) : { progress },
+      typeof progress === 'object' && progress !== null
+        ? (progress as Record<string, unknown>)
+        : { progress },
     );
   });
 });
 
 // Health check for workers
-export async function getWorkerHealth(): Promise<{
+export function getWorkerHealth(): {
   workers: Array<{
     name: string;
     isRunning: boolean;
     isClosing: boolean;
     concurrency: number;
   }>;
-}> {
+} {
   return {
     workers: workers.map(({ name, worker }) => ({
       name,

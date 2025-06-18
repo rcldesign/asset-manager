@@ -13,7 +13,7 @@ export function getRedis(): Redis {
       maxRetriesPerRequest: null, // Required for BullMQ workers
       enableReadyCheck: true,
       lazyConnect: true,
-      retryStrategy: (times: number) => {
+      retryStrategy: (times: number): number => {
         // Exponential backoff with max 20 seconds between retries
         return Math.max(Math.min(Math.exp(times), 20000), 1000);
       },
@@ -47,7 +47,7 @@ export function createRedisConnection(): Redis {
     maxRetriesPerRequest: null, // Required for BullMQ
     enableReadyCheck: true,
     lazyConnect: false,
-    retryStrategy: (times: number) => {
+    retryStrategy: (times: number): number => {
       return Math.max(Math.min(Math.exp(times), 20000), 1000);
     },
   });

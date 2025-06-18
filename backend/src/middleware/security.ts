@@ -57,62 +57,74 @@ export function securityHeaders(): ReturnType<typeof helmet> {
 /**
  * General API rate limiting
  */
-export const generalRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 1000, // Limit each IP to 1000 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  // Skip successful requests to static assets
-  skip: (req: Request) => {
-    return req.url.includes('/static/') || req.url.includes('/public/');
-  },
-});
+export const generalRateLimit =
+  process.env.DISABLE_RATE_LIMITING === 'true'
+    ? (_req: Request, _res: Response, next: NextFunction): void => next()
+    : rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        limit: 1000, // Limit each IP to 1000 requests per windowMs
+        message: 'Too many requests from this IP, please try again later.',
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+        // Skip successful requests to static assets
+        skip: (req: Request) => {
+          return req.url.includes('/static/') || req.url.includes('/public/');
+        },
+      });
 
 /**
  * Strict rate limiting for authentication endpoints
  */
-export const authRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 5, // Limit each IP to 5 requests per windowMs
-  message: {
-    error: 'Too many authentication attempts, please try again later.',
-    retryAfter: 15 * 60, // 15 minutes in seconds
-  },
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  // Use more aggressive rate limiting for auth
-  skipSuccessfulRequests: false,
-  skipFailedRequests: false,
-});
+export const authRateLimit =
+  process.env.DISABLE_RATE_LIMITING === 'true'
+    ? (_req: Request, _res: Response, next: NextFunction): void => next()
+    : rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        limit: 5, // Limit each IP to 5 requests per windowMs
+        message: {
+          error: 'Too many authentication attempts, please try again later.',
+          retryAfter: 15 * 60, // 15 minutes in seconds
+        },
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+        // Use more aggressive rate limiting for auth
+        skipSuccessfulRequests: false,
+        skipFailedRequests: false,
+      });
 
 /**
  * Rate limiting for password reset requests
  */
-export const passwordResetRateLimit = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  limit: 3, // Limit each IP to 3 password reset requests per hour
-  message: {
-    error: 'Too many password reset attempts, please try again later.',
-    retryAfter: 60 * 60, // 1 hour in seconds
-  },
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-});
+export const passwordResetRateLimit =
+  process.env.DISABLE_RATE_LIMITING === 'true'
+    ? (_req: Request, _res: Response, next: NextFunction): void => next()
+    : rateLimit({
+        windowMs: 60 * 60 * 1000, // 1 hour
+        limit: 3, // Limit each IP to 3 password reset requests per hour
+        message: {
+          error: 'Too many password reset attempts, please try again later.',
+          retryAfter: 60 * 60, // 1 hour in seconds
+        },
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+      });
 
 /**
  * Rate limiting for 2FA attempts
  */
-export const twoFactorRateLimit = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  limit: 3, // Limit each IP to 3 2FA attempts per 5 minutes
-  message: {
-    error: 'Too many 2FA attempts, please try again later.',
-    retryAfter: 5 * 60, // 5 minutes in seconds
-  },
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-});
+export const twoFactorRateLimit =
+  process.env.DISABLE_RATE_LIMITING === 'true'
+    ? (_req: Request, _res: Response, next: NextFunction): void => next()
+    : rateLimit({
+        windowMs: 5 * 60 * 1000, // 5 minutes
+        limit: 3, // Limit each IP to 3 2FA attempts per 5 minutes
+        message: {
+          error: 'Too many 2FA attempts, please try again later.',
+          retryAfter: 5 * 60, // 5 minutes in seconds
+        },
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+      });
 
 /**
  * Additional security middleware for API endpoints

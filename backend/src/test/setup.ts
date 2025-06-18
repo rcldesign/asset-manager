@@ -9,9 +9,12 @@ process.env.JWT_SECRET = 'test-jwt-secret-32-characters-long';
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-32-characters-long';
 process.env.ENCRYPTION_KEY = 'test-32-byte-encryption-key-for-testing';
 process.env.SESSION_SECRET = 'test-session-secret-32-characters-long';
+process.env.DISABLE_RATE_LIMITING = 'true';
 
-// Database setup for tests (use in-memory SQLite for fast tests)
-process.env.DATABASE_URL = 'file:./test.db';
+// Database setup for tests
+// Use PostgreSQL format to match production configuration
+process.env.DATABASE_URL =
+  'postgresql://testuser:testpass@localhost:5432/asset_manager_test?schema=public';
 process.env.USE_EMBEDDED_DB = 'false'; // Use test database
 
 // Redis setup for tests
@@ -32,12 +35,15 @@ process.env.ENABLE_METRICS = 'false';
 
 // Extend Jest matchers
 import '@jest/globals';
+import { disconnectRedis } from '../lib/redis';
+import { _test_only_stopCleanupInterval } from '../middleware/auth';
+import { _test_only_stopOidcCleanupInterval } from '../routes/oidc';
 
 // Global test timeout for async operations
 jest.setTimeout(10000);
 
 // Setup global mocks
-beforeAll(async () => {
+beforeAll(() => {
   // Mock console methods to reduce noise in tests
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'info').mockImplementation(() => {});
@@ -56,6 +62,13 @@ beforeAll(async () => {
 afterAll(async () => {
   // Restore console methods
   jest.restoreAllMocks();
+
+  // Stop all known timers
+  _test_only_stopCleanupInterval();
+  _test_only_stopOidcCleanupInterval();
+
+  // Disconnect the global Redis client
+  await disconnectRedis();
 });
 
 // Global error handler for unhandled promises in tests

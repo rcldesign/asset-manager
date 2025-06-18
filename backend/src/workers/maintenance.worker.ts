@@ -38,7 +38,7 @@ export async function processMaintenanceJob(
         break;
 
       default:
-        throw new Error(`Unknown maintenance job type: ${data.type}`);
+        throw new Error(`Unknown maintenance job type: ${String(data.type)}`);
     }
 
     await job.updateProgress(100);
@@ -53,13 +53,13 @@ export async function processMaintenanceJob(
       status: 'completed',
       processed,
     };
-  } catch (err) {
-    logger.error('Failed to process maintenance job', {
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    logger.error('Failed to process maintenance job', error, {
       jobId: job.id,
-      error: err instanceof Error ? err.message : String(err),
       type: data.type,
     });
-    throw err;
+    throw error;
   }
 }
 

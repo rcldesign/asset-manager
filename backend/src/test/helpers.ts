@@ -1,8 +1,13 @@
 import { PrismaClient } from '@prisma/client';
 import type { Application } from 'express';
 import request from 'supertest';
+import bcrypt from 'bcrypt';
+import { randomBytes, createHash } from 'crypto';
 import { generateTokens } from '../utils/auth';
 import type { UserRole } from '@prisma/client';
+
+// Re-export TOTP testing helpers
+export * from './helpers/totp';
 
 export interface TestUser {
   id: string;
@@ -30,10 +35,13 @@ export class TestDatabaseHelper {
   private prisma: PrismaClient;
 
   constructor() {
+    // Use the DATABASE_URL from environment, which should be set by .env.test
     this.prisma = new PrismaClient({
       datasources: {
         db: {
-          url: 'file:./test.db',
+          url:
+            process.env.DATABASE_URL ||
+            'postgresql://testuser:testpass@localhost:5432/asset_manager_test?schema=public',
         },
       },
     });
@@ -94,13 +102,19 @@ export class TestDatabaseHelper {
       organizationId = org.id;
     }
 
+    // Hash password if provided
+    let passwordHash = null;
+    if (data.password) {
+      passwordHash = await bcrypt.hash(data.password, 10);
+    }
+
     const user = await this.prisma.user.create({
       data: {
         email: data.email || `test-${Date.now()}@example.com`,
         fullName: data.fullName || 'Test User',
         role: data.role || 'MEMBER',
         organizationId,
-        passwordHash: data.password || null, // In real tests, this would be hashed
+        passwordHash,
         emailVerified: data.emailVerified ?? true,
         totpEnabled: data.totpEnabled ?? false,
         isActive: data.isActive ?? true,
@@ -143,10 +157,12 @@ export class TestDatabaseHelper {
       expiresAt?: Date;
     } = {},
   ): Promise<{ id: string; token: string; name: string }> {
+    const apiTokenValue = randomBytes(32).toString('hex'); // Generate a secure, valid hex token
+    const hashedToken = createHash('sha256').update(apiTokenValue).digest('hex'); // Use SHA-256 for consistent hashing
     const token = await this.prisma.apiToken.create({
       data: {
         name: data.name || `Test Token ${Date.now()}`,
-        token: `test-token-${Date.now()}`,
+        token: hashedToken, // Store SHA-256 hash
         userId,
         expiresAt: data.expiresAt,
       },
@@ -154,7 +170,7 @@ export class TestDatabaseHelper {
 
     return {
       id: token.id,
-      token: token.token,
+      token: apiTokenValue, // Return raw token for use in tests
       name: token.name,
     };
   }
@@ -293,3 +309,73 @@ export const expectSuccessfulResponse = (response: request.Response, statusCode 
   expect(response.status).toBe(statusCode);
   expect(response.body).not.toHaveProperty('error');
 };
+
+/**
+ * TOTP Integration Testing Helpers
+ *
+ * These helpers provide controlled-time TOTP testing for integration tests
+ * instead of mocking speakeasy.totp.verify to always return true.
+ */
+
+import { UserService } from '../services/user.service';
+import {
+  TEST_TOTP_SECRET,
+  MOCK_TIME_EPOCH_SECONDS,
+  generateValidTOTPToken,
+  generateExpiredTOTPToken,
+} from './helpers/totp';
+
+/**
+ * Test-enabled UserService that accepts time parameters for TOTP verification
+ * This allows us to test actual TOTP logic with controlled time.
+ */
+export class TestUserService extends UserService {
+  /**
+   * Authenticate user with controlled time for TOTP testing
+   */
+  async authenticateUserWithTime(
+    email: string,
+    password: string,
+    totpToken?: string,
+    timeForTesting?: number,
+  ) {
+    return super.authenticateUser(email, password, totpToken, timeForTesting);
+  }
+
+  /**
+   * Enable 2FA with controlled time for TOTP testing
+   */
+  async enableTwoFactorWithTime(userId: string, totpToken: string, timeForTesting?: number) {
+    return super.enableTwoFactor(userId, totpToken, timeForTesting);
+  }
+
+  /**
+   * Disable 2FA with controlled time for TOTP testing
+   */
+  async disableTwoFactorWithTime(userId: string, totpToken: string, timeForTesting?: number) {
+    return super.disableTwoFactor(userId, totpToken, timeForTesting);
+  }
+}
+
+/**
+ * Generate a valid TOTP token for the test secret and current mock time
+ */
+export function generateTestTOTPToken(time: number = MOCK_TIME_EPOCH_SECONDS): string {
+  return generateValidTOTPToken(TEST_TOTP_SECRET, time);
+}
+
+/**
+ * Generate a valid TOTP token for the test secret and current system time
+ * Use this for integration tests where real-time verification is used
+ */
+export function generateCurrentTestTOTPToken(): string {
+  const currentTimeSeconds = Math.floor(Date.now() / 1000);
+  return generateValidTOTPToken(TEST_TOTP_SECRET, currentTimeSeconds);
+}
+
+/**
+ * Generate an expired TOTP token for the test secret
+ */
+export function generateExpiredTestTOTPToken(time: number = MOCK_TIME_EPOCH_SECONDS): string {
+  return generateExpiredTOTPToken(TEST_TOTP_SECRET, time);
+}

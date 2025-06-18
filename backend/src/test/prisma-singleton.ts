@@ -1,16 +1,23 @@
 import type { PrismaClient } from '@prisma/client';
-import { mockDeep, mockReset, type DeepMockProxy } from 'jest-mock-extended';
+import { mockReset, type DeepMockProxy } from 'jest-mock-extended';
 
+// Tell Jest to use the manual mock
+jest.mock('../lib/prisma');
+
+// Import the mocked prisma
 import { prisma } from '../lib/prisma';
 
-// Mock the entire prisma module
-jest.mock('../lib/prisma', () => ({
-  __esModule: true,
-  prisma: mockDeep<PrismaClient>(),
-}));
+// Export it as prismaMock with correct typing
+export const prismaMock = prisma as DeepMockProxy<PrismaClient>;
 
+// Reset the mock before each test to ensure test isolation.
 beforeEach(() => {
   mockReset(prismaMock);
 });
 
-export const prismaMock = prisma as unknown as DeepMockProxy<PrismaClient>;
+// Clear the global prisma to prevent caching issues
+beforeAll(() => {
+  if (global.prisma) {
+    delete global.prisma;
+  }
+});

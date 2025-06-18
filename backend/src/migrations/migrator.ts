@@ -2,7 +2,13 @@ import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 import { UserService } from '../services/user.service';
 import { OrganizationService } from '../services/organization.service';
-import type { LegacyDataExport, MigrationContext, MigrationOptions, FileMapping } from './types';
+import type {
+  LegacyDataExport,
+  LegacyMaintenanceEvent,
+  MigrationContext,
+  MigrationOptions,
+  FileMapping,
+} from './types';
 import {
   loadLegacyData,
   createMigrationContext,
@@ -164,8 +170,9 @@ export class DataMigrator {
 
     // Handle any global maintenance events (not tied to specific assets)
     if (legacyData.globalSettings?.maintenanceEvents) {
-      const globalEvents = Array.isArray(legacyData.globalSettings.maintenanceEvents)
-        ? legacyData.globalSettings.maintenanceEvents
+      const globalEventsRaw = legacyData.globalSettings.maintenanceEvents;
+      const globalEvents = Array.isArray(globalEventsRaw)
+        ? (globalEventsRaw as LegacyMaintenanceEvent[])
         : [];
 
       if (globalEvents.length > 0) {
@@ -201,7 +208,7 @@ export class DataMigrator {
     // Check if user already exists
     let existingUser = null;
     try {
-      existingUser = await this.userService.getUserByEmail(ownerEmail);
+      existingUser = await this.userService.findByEmail(ownerEmail);
     } catch {
       // User doesn't exist, which is fine
     }
@@ -303,7 +310,7 @@ export class DataMigrator {
   /**
    * Validate file mappings and check for missing files
    */
-  async validateFileMappings(fileMappings: FileMapping[]): Promise<FileMapping[]> {
+  validateFileMappings(fileMappings: FileMapping[]): FileMapping[] {
     const validatedMappings: FileMapping[] = [];
 
     for (const mapping of fileMappings) {

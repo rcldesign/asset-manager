@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import type { SignOptions, VerifyOptions } from 'jsonwebtoken';
 import jwt from 'jsonwebtoken';
-import speakeasy from 'speakeasy';
+import * as speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
 import crypto from 'crypto';
 import { config } from '../config';
@@ -235,14 +235,16 @@ export async function generateQRCode(otpAuthUrl: string): Promise<string> {
  * Verify a TOTP token against a secret
  * @param token - The 6-digit TOTP token to verify
  * @param secret - The base32-encoded TOTP secret
+ * @param timeForTesting - Optional time override for testing (Unix timestamp in seconds)
  * @returns True if the token is valid, false otherwise
  */
-export function verifyTOTPToken(token: string, secret: string): boolean {
+export function verifyTOTPToken(token: string, secret: string, timeForTesting?: number): boolean {
   return speakeasy.totp.verify({
     secret,
     encoding: 'base32',
     token,
     window: 2, // Allow 2 time steps tolerance (±60 seconds)
+    time: timeForTesting, // Will be undefined in prod, which is what we want
   });
 }
 

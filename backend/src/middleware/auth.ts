@@ -26,7 +26,7 @@ export interface AuthenticatedRequest extends Request {
 const failedAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
 // Clean up old failed attempt records
-setInterval(
+const cleanupInterval = setInterval(
   () => {
     const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
     for (const [key, attempt] of failedAttempts.entries()) {
@@ -37,6 +37,16 @@ setInterval(
   },
   10 * 60 * 1000,
 ); // Run every 10 minutes
+
+// Export for testing purposes to reset state between tests
+export const _test_only_resetFailedAttempts = (): void => {
+  failedAttempts.clear();
+};
+
+// Export for testing purposes to stop the interval timer
+export const _test_only_stopCleanupInterval = (): void => {
+  clearInterval(cleanupInterval);
+};
 
 const userService = new UserService();
 
@@ -154,7 +164,7 @@ export async function authenticateApiToken(
       throw new AuthenticationError('Invalid API token format');
     }
 
-    const user = await userService.verifyApiToken(token);
+    const user = await userService.validateApiToken(token);
 
     if (!user) {
       throw new AuthenticationError('Invalid API token');
@@ -214,6 +224,33 @@ export function requireRole(...allowedRoles: UserRole[]) {
 
     next();
   };
+}
+
+/**
+ * Combined authentication middleware that supports both JWT and API tokens
+ * Inspects the token format to decide which authentication strategy to use
+ * @param req - Express request object
+ * @param res - Express response object (unused)
+ * @param next - Express next function
+ * @throws {AuthenticationError} When token is missing, invalid, or user is inactive
+ */
+export function authenticateRequest(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+
+  // If no header, default to JWT logic which will produce the correct error
+  if (!authHeader?.startsWith('Bearer ')) {
+    void authenticateJWT(req, res, next);
+    return;
+  }
+
+  const token = authHeader.substring(7);
+
+  // Heuristic: JWTs contain dots. API tokens in this system are pure hex
+  if (token.includes('.')) {
+    void authenticateJWT(req, res, next);
+  } else {
+    void authenticateApiToken(req, res, next);
+  }
 }
 
 /**

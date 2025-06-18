@@ -5,9 +5,7 @@ import type { EmailJob } from '../lib/queue';
 
 // Mock SMTP implementation - replace with actual email service
 class EmailService {
-  async sendEmail(
-    emailData: EmailJob,
-  ): Promise<{ messageId: string; accepted: string[]; rejected: string[] }> {
+  sendEmail(emailData: EmailJob): { messageId: string; accepted: string[]; rejected: string[] } {
     // In development/test, log the email instead of sending
     if (config.env !== 'production' || !config.smtp) {
       logger.info('Email (mock):', {
@@ -34,10 +32,7 @@ class EmailService {
     };
   }
 
-  async renderTemplate(
-    template: string,
-    data: Record<string, unknown>,
-  ): Promise<{ html: string; text: string }> {
+  renderTemplate(template: string, data: Record<string, unknown>): { html: string; text: string } {
     // Simple template rendering - replace with proper template engine
     const templates: Record<string, { html: string; text: string }> = {
       welcome: {
@@ -110,7 +105,7 @@ export async function processEmailJob(
 
     // Render template if provided
     if (data.template && data.templateData) {
-      const rendered = await emailService.renderTemplate(data.template, data.templateData);
+      const rendered = emailService.renderTemplate(data.template, data.templateData);
       data.html = data.html || rendered.html;
       data.text = data.text || rendered.text;
     }
@@ -118,7 +113,7 @@ export async function processEmailJob(
     await job.updateProgress(50);
 
     // Send email
-    const result = await emailService.sendEmail(data);
+    const result = emailService.sendEmail(data);
 
     await job.updateProgress(100);
 
@@ -135,13 +130,13 @@ export async function processEmailJob(
       messageId: result.messageId,
       status: 'sent',
     };
-  } catch (err) {
-    logger.error('Failed to process email job', {
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    logger.error('Failed to process email job', error, {
       jobId: job.id,
-      error: err instanceof Error ? err.message : String(err),
       to: data.to,
       subject: data.subject,
     });
-    throw err;
+    throw error;
   }
 }

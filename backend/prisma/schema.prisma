@@ -89,18 +89,20 @@ model Session {
 }
 
 model ApiToken {
-  id        String    @id @default(uuid())
-  userId    String
-  name      String
-  token     String    @unique
-  lastUsed  DateTime?
-  expiresAt DateTime?
-  createdAt DateTime  @default(now())
+  id          String    @id @default(uuid())
+  userId      String
+  name        String
+  token       String    @unique
+  tokenPrefix String?   @db.VarChar(8)
+  lastUsed    DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([token])
+  @@index([tokenPrefix])
   @@map("api_tokens")
 }
 

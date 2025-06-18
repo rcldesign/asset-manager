@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import jwt from 'jsonwebtoken';
-import speakeasy from 'speakeasy';
+import * as speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
 import { AuthService } from '../../../services/auth.service';
 import { UserService } from '../../../services/user.service';
@@ -32,17 +32,14 @@ describe('AuthService', () => {
   const mockUser: User = {
     id: 'user-123',
     email: 'test@example.com',
-    password: 'hashedPassword',
+    passwordHash: 'hashedPassword',
     fullName: 'Test User',
-    role: UserRole.USER,
+    role: UserRole.MEMBER,
     organizationId: 'org-123',
     isActive: true,
     totpEnabled: false,
     totpSecret: null,
-    isEmailVerified: true,
-    emailVerificationToken: null,
-    passwordResetToken: null,
-    passwordResetExpiry: null,
+    emailVerified: true,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -54,7 +51,7 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     // Setup environment variables
     process.env.JWT_SECRET = mockEnvironment.JWT_SECRET;
     process.env.JWT_REFRESH_SECRET = mockEnvironment.JWT_REFRESH_SECRET;
@@ -78,8 +75,10 @@ describe('AuthService', () => {
 
     it('should authenticate user successfully without 2FA', async () => {
       userServiceInstance.verifyPassword.mockResolvedValue(mockUser);
-      (mockJwt.sign as jest.Mock).mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
-      
+      (mockJwt.sign as jest.Mock)
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+
       mockPrisma.session.create.mockResolvedValue({
         id: 'session-123',
         userId: mockUser.id,
@@ -95,24 +94,27 @@ describe('AuthService', () => {
       expect(result.tokens.accessToken).toBe('access-token');
       expect(result.tokens.refreshToken).toBe('refresh-token');
       expect(result.requiresTOTP).toBeUndefined();
-      expect(userServiceInstance.verifyPassword).toHaveBeenCalledWith(credentials.email, credentials.password);
+      expect(userServiceInstance.verifyPassword).toHaveBeenCalledWith(
+        credentials.email,
+        credentials.password,
+      );
     });
 
     it('should throw error for invalid credentials', async () => {
       userServiceInstance.verifyPassword.mockResolvedValue(null);
 
-      await expect(authService.authenticate(credentials))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid email or password'));
+      await expect(authService.authenticate(credentials)).rejects.toThrow(
+        new AuthenticationError('Invalid email or password'),
+      );
     });
 
     it('should throw error for inactive user', async () => {
       const inactiveUser = { ...mockUser, isActive: false };
       userServiceInstance.verifyPassword.mockResolvedValue(inactiveUser);
 
-      await expect(authService.authenticate(credentials))
-        .rejects
-        .toThrow(new AuthenticationError('Account is deactivated'));
+      await expect(authService.authenticate(credentials)).rejects.toThrow(
+        new AuthenticationError('Account is deactivated'),
+      );
     });
 
     it('should require TOTP when enabled but not provided', async () => {
@@ -129,11 +131,13 @@ describe('AuthService', () => {
     it('should authenticate with valid TOTP', async () => {
       const totpUser = { ...mockUser, totpEnabled: true, totpSecret: 'secret' };
       const credentialsWithTOTP = { ...credentials, totpCode: '123456' };
-      
+
       userServiceInstance.verifyPassword.mockResolvedValue(totpUser);
       mockSpeakeasy.totp.verify.mockReturnValue(true);
-      (mockJwt.sign as jest.Mock).mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
-      
+      (mockJwt.sign as jest.Mock)
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+
       mockPrisma.session.create.mockResolvedValue({
         id: 'session-123',
         userId: totpUser.id,
@@ -158,31 +162,33 @@ describe('AuthService', () => {
     it('should throw error for invalid TOTP', async () => {
       const totpUser = { ...mockUser, totpEnabled: true, totpSecret: 'secret' };
       const credentialsWithTOTP = { ...credentials, totpCode: '123456' };
-      
+
       userServiceInstance.verifyPassword.mockResolvedValue(totpUser);
       mockSpeakeasy.totp.verify.mockReturnValue(false);
 
-      await expect(authService.authenticate(credentialsWithTOTP))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid 2FA code'));
+      await expect(authService.authenticate(credentialsWithTOTP)).rejects.toThrow(
+        new AuthenticationError('Invalid 2FA code'),
+      );
     });
 
     it('should throw error for TOTP enabled but no secret', async () => {
       const totpUser = { ...mockUser, totpEnabled: true, totpSecret: null };
       const credentialsWithTOTP = { ...credentials, totpCode: '123456' };
-      
+
       userServiceInstance.verifyPassword.mockResolvedValue(totpUser);
 
-      await expect(authService.authenticate(credentialsWithTOTP))
-        .rejects
-        .toThrow(new AuthenticationError('TOTP not properly configured'));
+      await expect(authService.authenticate(credentialsWithTOTP)).rejects.toThrow(
+        new AuthenticationError('TOTP not properly configured'),
+      );
     });
   });
 
   describe('generateTokens', () => {
     it('should generate valid token pair', async () => {
-      (mockJwt.sign as jest.Mock).mockReturnValueOnce('access-token').mockReturnValueOnce('refresh-token');
-      
+      (mockJwt.sign as jest.Mock)
+        .mockReturnValueOnce('access-token')
+        .mockReturnValueOnce('refresh-token');
+
       mockPrisma.session.create.mockResolvedValue({
         id: 'session-123',
         userId: mockUser.id,
@@ -210,7 +216,7 @@ describe('AuthService', () => {
           expiresIn: '15m',
           issuer: 'dumbassets',
           audience: 'dumbassets-api',
-        }
+        },
       );
 
       expect(mockJwt.sign).toHaveBeenCalledWith(
@@ -223,24 +229,24 @@ describe('AuthService', () => {
           expiresIn: '7d',
           issuer: 'dumbassets',
           audience: 'dumbassets-api',
-        }
+        },
       );
     });
 
     it('should throw error when JWT secrets not configured', async () => {
       process.env.JWT_SECRET = '';
-      
-      await expect(authService.generateTokens(mockUser))
-        .rejects
-        .toThrow(new AppError('JWT secrets not configured', 500));
+
+      await expect(authService.generateTokens(mockUser)).rejects.toThrow(
+        new AppError('JWT secrets not configured', 500),
+      );
     });
 
     it('should throw error when JWT refresh secret not configured', async () => {
       process.env.JWT_REFRESH_SECRET = '';
-      
-      await expect(authService.generateTokens(mockUser))
-        .rejects
-        .toThrow(new AppError('JWT secrets not configured', 500));
+
+      await expect(authService.generateTokens(mockUser)).rejects.toThrow(
+        new AppError('JWT secrets not configured', 500),
+      );
     });
   });
 
@@ -259,7 +265,9 @@ describe('AuthService', () => {
     it('should refresh token successfully', async () => {
       (mockJwt.verify as jest.Mock).mockReturnValue({ userId: mockUser.id, type: 'refresh' });
       mockPrisma.session.findUnique.mockResolvedValue(mockSession);
-      (mockJwt.sign as jest.Mock).mockReturnValueOnce('new-access-token').mockReturnValueOnce('new-refresh-token');
+      (mockJwt.sign as jest.Mock)
+        .mockReturnValueOnce('new-access-token')
+        .mockReturnValueOnce('new-refresh-token');
       mockPrisma.session.delete.mockResolvedValue(mockSession);
       mockPrisma.session.create.mockResolvedValue({
         id: 'new-session-123',
@@ -283,18 +291,18 @@ describe('AuthService', () => {
         throw new jwt.JsonWebTokenError('Invalid token');
       });
 
-      await expect(authService.refreshToken(refreshToken))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid refresh token'));
+      await expect(authService.refreshToken(refreshToken)).rejects.toThrow(
+        new AuthenticationError('Invalid refresh token'),
+      );
     });
 
     it('should throw error for non-existent session', async () => {
       (mockJwt.verify as jest.Mock).mockReturnValue({ userId: mockUser.id, type: 'refresh' });
       mockPrisma.session.findUnique.mockResolvedValue(null);
 
-      await expect(authService.refreshToken(refreshToken))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid or expired refresh token'));
+      await expect(authService.refreshToken(refreshToken)).rejects.toThrow(
+        new AuthenticationError('Invalid or expired refresh token'),
+      );
     });
 
     it('should throw error for expired session', async () => {
@@ -302,9 +310,9 @@ describe('AuthService', () => {
       (mockJwt.verify as jest.Mock).mockReturnValue({ userId: mockUser.id, type: 'refresh' });
       mockPrisma.session.findUnique.mockResolvedValue(expiredSession);
 
-      await expect(authService.refreshToken(refreshToken))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid or expired refresh token'));
+      await expect(authService.refreshToken(refreshToken)).rejects.toThrow(
+        new AuthenticationError('Invalid or expired refresh token'),
+      );
     });
 
     it('should throw error for inactive user', async () => {
@@ -312,17 +320,17 @@ describe('AuthService', () => {
       (mockJwt.verify as jest.Mock).mockReturnValue({ userId: mockUser.id, type: 'refresh' });
       mockPrisma.session.findUnique.mockResolvedValue(inactiveUserSession);
 
-      await expect(authService.refreshToken(refreshToken))
-        .rejects
-        .toThrow(new AuthenticationError('Account is deactivated'));
+      await expect(authService.refreshToken(refreshToken)).rejects.toThrow(
+        new AuthenticationError('Account is deactivated'),
+      );
     });
 
     it('should throw error when JWT refresh secret not configured', async () => {
       process.env.JWT_REFRESH_SECRET = '';
 
-      await expect(authService.refreshToken(refreshToken))
-        .rejects
-        .toThrow(new AppError('JWT refresh secret not configured', 500));
+      await expect(authService.refreshToken(refreshToken)).rejects.toThrow(
+        new AppError('JWT refresh secret not configured', 500),
+      );
     });
   });
 
@@ -336,7 +344,7 @@ describe('AuthService', () => {
         role: mockUser.role,
         organizationId: mockUser.organizationId,
       };
-      
+
       (mockJwt.verify as jest.Mock).mockReturnValue(jwtPayload);
       userServiceInstance.getUserById.mockResolvedValue(mockUser);
 
@@ -352,9 +360,9 @@ describe('AuthService', () => {
         throw new jwt.JsonWebTokenError('Invalid token');
       });
 
-      await expect(authService.verifyToken(accessToken))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid token'));
+      await expect(authService.verifyToken(accessToken)).rejects.toThrow(
+        new AuthenticationError('Invalid token'),
+      );
     });
 
     it('should throw error for non-existent user', async () => {
@@ -362,29 +370,29 @@ describe('AuthService', () => {
       (mockJwt.verify as jest.Mock).mockReturnValue(jwtPayload);
       userServiceInstance.getUserById.mockResolvedValue(null);
 
-      await expect(authService.verifyToken(accessToken))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid token'));
+      await expect(authService.verifyToken(accessToken)).rejects.toThrow(
+        new AuthenticationError('Invalid token'),
+      );
     });
 
     it('should throw error for inactive user', async () => {
       const jwtPayload = { userId: mockUser.id };
       const inactiveUser = { ...mockUser, isActive: false };
-      
+
       (mockJwt.verify as jest.Mock).mockReturnValue(jwtPayload);
       userServiceInstance.getUserById.mockResolvedValue(inactiveUser);
 
-      await expect(authService.verifyToken(accessToken))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid token'));
+      await expect(authService.verifyToken(accessToken)).rejects.toThrow(
+        new AuthenticationError('Invalid token'),
+      );
     });
 
     it('should throw error when JWT secret not configured', async () => {
       process.env.JWT_SECRET = '';
 
-      await expect(authService.verifyToken(accessToken))
-        .rejects
-        .toThrow(new AppError('JWT secret not configured', 500));
+      await expect(authService.verifyToken(accessToken)).rejects.toThrow(
+        new AppError('JWT secret not configured', 500),
+      );
     });
   });
 
@@ -397,10 +405,10 @@ describe('AuthService', () => {
         base32: 'SECRET123',
         otpauth_url: 'otpauth://totp/TestApp%20(test@example.com)?secret=SECRET123&issuer=TestApp',
       };
-      
+
       userServiceInstance.getUserById.mockResolvedValue(mockUser);
       mockSpeakeasy.generateSecret.mockReturnValue(mockSecret as any);
-      (mockQrcode.toDataURL as jest.Mock).mockResolvedValue('data:image/png;base64,qrcode');
+      (mockQrcode.toDataURL as jest.Mock<any>).mockResolvedValue('data:image/png;base64,qrcode');
       mockPrisma.user.update.mockResolvedValue({ ...mockUser, totpSecret: mockSecret.base32 });
 
       const result = await authService.setupTOTP(userId, appName);
@@ -424,18 +432,18 @@ describe('AuthService', () => {
     it('should throw error for non-existent user', async () => {
       userServiceInstance.getUserById.mockResolvedValue(null);
 
-      await expect(authService.setupTOTP(userId))
-        .rejects
-        .toThrow(new AppError('User not found', 404));
+      await expect(authService.setupTOTP(userId)).rejects.toThrow(
+        new AppError('User not found', 404),
+      );
     });
 
     it('should throw error if TOTP already enabled', async () => {
       const totpEnabledUser = { ...mockUser, totpEnabled: true };
       userServiceInstance.getUserById.mockResolvedValue(totpEnabledUser);
 
-      await expect(authService.setupTOTP(userId))
-        .rejects
-        .toThrow(new ValidationError('TOTP is already enabled for this user'));
+      await expect(authService.setupTOTP(userId)).rejects.toThrow(
+        new ValidationError('TOTP is already enabled for this user'),
+      );
     });
   });
 
@@ -467,27 +475,27 @@ describe('AuthService', () => {
     it('should throw error for non-existent user', async () => {
       userServiceInstance.getUserById.mockResolvedValue(null);
 
-      await expect(authService.enableTOTP(userId, totpCode))
-        .rejects
-        .toThrow(new AppError('User not found', 404));
+      await expect(authService.enableTOTP(userId, totpCode)).rejects.toThrow(
+        new AppError('User not found', 404),
+      );
     });
 
     it('should throw error if TOTP setup not initiated', async () => {
       const userWithoutSecret = { ...mockUser, totpSecret: null };
       userServiceInstance.getUserById.mockResolvedValue(userWithoutSecret);
 
-      await expect(authService.enableTOTP(userId, totpCode))
-        .rejects
-        .toThrow(new ValidationError('TOTP setup not initiated'));
+      await expect(authService.enableTOTP(userId, totpCode)).rejects.toThrow(
+        new ValidationError('TOTP setup not initiated'),
+      );
     });
 
     it('should throw error if TOTP already enabled', async () => {
       const totpEnabledUser = { ...mockUser, totpEnabled: true, totpSecret: 'SECRET123' };
       userServiceInstance.getUserById.mockResolvedValue(totpEnabledUser);
 
-      await expect(authService.enableTOTP(userId, totpCode))
-        .rejects
-        .toThrow(new ValidationError('TOTP is already enabled'));
+      await expect(authService.enableTOTP(userId, totpCode)).rejects.toThrow(
+        new ValidationError('TOTP is already enabled'),
+      );
     });
 
     it('should throw error for invalid TOTP code', async () => {
@@ -495,9 +503,9 @@ describe('AuthService', () => {
       userServiceInstance.getUserById.mockResolvedValue(userWithSecret);
       mockSpeakeasy.totp.verify.mockReturnValue(false);
 
-      await expect(authService.enableTOTP(userId, totpCode))
-        .rejects
-        .toThrow(new ValidationError('Invalid TOTP code'));
+      await expect(authService.enableTOTP(userId, totpCode)).rejects.toThrow(
+        new ValidationError('Invalid TOTP code'),
+      );
     });
   });
 
@@ -509,11 +517,18 @@ describe('AuthService', () => {
       const totpEnabledUser = { ...mockUser, totpEnabled: true, totpSecret: 'SECRET123' };
       userServiceInstance.getUserById.mockResolvedValue(totpEnabledUser);
       userServiceInstance.verifyPassword.mockResolvedValue(totpEnabledUser);
-      mockPrisma.user.update.mockResolvedValue({ ...totpEnabledUser, totpEnabled: false, totpSecret: null });
+      mockPrisma.user.update.mockResolvedValue({
+        ...totpEnabledUser,
+        totpEnabled: false,
+        totpSecret: null,
+      });
 
       await authService.disableTOTP(userId, password);
 
-      expect(userServiceInstance.verifyPassword).toHaveBeenCalledWith(totpEnabledUser.email, password);
+      expect(userServiceInstance.verifyPassword).toHaveBeenCalledWith(
+        totpEnabledUser.email,
+        password,
+      );
       expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: userId },
         data: {
@@ -526,18 +541,18 @@ describe('AuthService', () => {
     it('should throw error for non-existent user', async () => {
       userServiceInstance.getUserById.mockResolvedValue(null);
 
-      await expect(authService.disableTOTP(userId, password))
-        .rejects
-        .toThrow(new AppError('User not found', 404));
+      await expect(authService.disableTOTP(userId, password)).rejects.toThrow(
+        new AppError('User not found', 404),
+      );
     });
 
     it('should throw error if TOTP not enabled', async () => {
       const userWithoutTOTP = { ...mockUser, totpEnabled: false };
       userServiceInstance.getUserById.mockResolvedValue(userWithoutTOTP);
 
-      await expect(authService.disableTOTP(userId, password))
-        .rejects
-        .toThrow(new ValidationError('TOTP is not enabled'));
+      await expect(authService.disableTOTP(userId, password)).rejects.toThrow(
+        new ValidationError('TOTP is not enabled'),
+      );
     });
 
     it('should throw error for invalid password', async () => {
@@ -545,9 +560,9 @@ describe('AuthService', () => {
       userServiceInstance.getUserById.mockResolvedValue(totpEnabledUser);
       userServiceInstance.verifyPassword.mockResolvedValue(null);
 
-      await expect(authService.disableTOTP(userId, password))
-        .rejects
-        .toThrow(new AuthenticationError('Invalid password'));
+      await expect(authService.disableTOTP(userId, password)).rejects.toThrow(
+        new AuthenticationError('Invalid password'),
+      );
     });
   });
 

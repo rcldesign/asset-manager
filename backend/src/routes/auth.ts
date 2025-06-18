@@ -4,7 +4,11 @@ import { UserService } from '../services/user.service';
 import { OrganizationService } from '../services/organization.service';
 import { generateTokens, verifyRefreshToken, generateQRCode } from '../utils/auth';
 import { ValidationError } from '../utils/errors';
-import { authenticateJWT, type AuthenticatedRequest } from '../middleware/auth';
+import {
+  authenticateJWT,
+  authenticateRequest,
+  type AuthenticatedRequest,
+} from '../middleware/auth';
 import { validateRequest, authSchemas, commonSchemas } from '../middleware/validation';
 import { authRateLimit, twoFactorRateLimit } from '../middleware/security';
 
@@ -95,22 +99,15 @@ router.post(
     try {
       const { email, password, fullName, organizationName } = req.body as RegisterBody;
 
-      // Create organization first
-      const organization = await organizationService.createOrganization({
+      // Create organization and owner user in a single atomic transaction
+      const result = await organizationService.create({
         name: organizationName,
+        ownerEmail: email,
+        ownerPassword: password,
+        ownerFullName: fullName,
       });
 
-      // Create user as organization owner
-      const user = await userService.createUser({
-        email,
-        password,
-        fullName,
-        role: 'OWNER',
-        organizationId: organization.id,
-      });
-
-      // Set user as organization owner
-      await organizationService.setOwner(organization.id, user.id);
+      const { organization, owner: user } = result;
 
       // Generate tokens
       const tokens = generateTokens({
@@ -128,10 +125,13 @@ router.post(
           organizationId: user.organizationId,
           emailVerified: user.emailVerified,
           totpEnabled: user.totpEnabled,
+          isActive: user.isActive,
         },
         organization: {
           id: organization.id,
           name: organization.name,
+          createdAt: organization.createdAt,
+          updatedAt: organization.updatedAt,
         },
         tokens,
       });
@@ -246,6 +246,9 @@ router.post(
           fullName: authResult.user.fullName,
           role: authResult.user.role,
           organizationId: authResult.user.organizationId,
+          emailVerified: authResult.user.emailVerified,
+          totpEnabled: authResult.user.totpEnabled,
+          isActive: authResult.user.isActive,
         },
         tokens,
       });
@@ -294,7 +297,7 @@ router.post('/logout', authenticateJWT, (_req: Request, res: Response, next: Nex
   }
 });
 
-router.get('/me', authenticateJWT, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/me', authenticateRequest, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authenticatedReq = req as AuthenticatedRequest;
     const user = await userService.getUserById(authenticatedReq.user.id);
@@ -409,7 +412,7 @@ router.post(
 router.get('/tokens', authenticateJWT, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authenticatedReq = req as AuthenticatedRequest;
-    const tokens = await userService.getUserApiTokens(authenticatedReq.user.id);
+    const tokens = await userService.listApiTokens(authenticatedReq.user.id);
 
     res.json({ tokens });
   } catch (error) {
@@ -436,6 +439,7 @@ router.post(
         name: apiToken.name,
         token: apiToken.token,
         expiresAt: apiToken.expiresAt,
+        createdAt: apiToken.createdAt,
         message:
           'API token created successfully. This is the only time you will see the token value.',
       });
@@ -454,7 +458,7 @@ router.delete(
       const authenticatedReq = req as AuthenticatedRequest;
       const { tokenId } = req.params as { tokenId: string };
 
-      await userService.deleteApiToken(authenticatedReq.user.id, tokenId);
+      await userService.revokeApiToken(authenticatedReq.user.id, tokenId);
 
       res.json({ message: 'API token deleted successfully' });
     } catch (error) {

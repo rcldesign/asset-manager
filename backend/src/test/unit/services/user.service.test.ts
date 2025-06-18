@@ -2,19 +2,33 @@ import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { UserService } from '../../../services/user.service';
 import { UserRole } from '@prisma/client';
 import { prismaMock } from '../../prisma-singleton';
+import bcrypt from 'bcrypt';
 
-// Mock bcrypt
-jest.mock('bcrypt', () => ({
-  hash: jest.fn(),
-  compare: jest.fn(),
+// Mock utils/crypto locally since it's specific to this test
+jest.mock('../../../utils/crypto', () => ({
+  generateSecureToken: jest.fn(() => 'ab12cd34ef56gh78ij90kl12mn34op56qr78st90uv12wx34yz56'), // 64-char hex string
 }));
 
 // Type the mocked bcrypt correctly
-const bcrypt = require('bcrypt');
-const mockBcrypt = bcrypt as {
+interface MockedBcrypt {
   hash: jest.MockedFunction<typeof bcrypt.hash>;
   compare: jest.MockedFunction<typeof bcrypt.compare>;
-};
+}
+const mockBcrypt = bcrypt as unknown as MockedBcrypt;
+
+// Simplified test to check if Prisma mock works without other mocks
+describe('Prisma Mock Test', () => {
+  test('prismaMock should be defined and mockable', async () => {
+    expect(prismaMock).toBeDefined();
+    expect(prismaMock.user).toBeDefined();
+    expect(prismaMock.user.findUnique).toBeDefined();
+
+    // Try to mock a simple response
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    const result = await prismaMock.user.findUnique({ where: { id: 'test' } });
+    expect(result).toBeNull();
+  });
+});
 
 describe('UserService', () => {
   let userService: UserService;
@@ -34,7 +48,7 @@ describe('UserService', () => {
       };
 
       const hashedPassword = 'hashed-password';
-      mockBcrypt.hash.mockResolvedValue(hashedPassword);
+      mockBcrypt.hash.mockResolvedValue(hashedPassword as never);
 
       const createdUser = {
         id: 'user-123',
@@ -206,7 +220,7 @@ describe('UserService', () => {
       };
 
       prismaMock.user.findUnique.mockResolvedValue(user);
-      mockBcrypt.compare.mockResolvedValue(true);
+      mockBcrypt.compare.mockResolvedValue(true as never);
 
       const result = await userService.verifyPassword(email, password);
 
@@ -240,7 +254,7 @@ describe('UserService', () => {
       };
 
       prismaMock.user.findUnique.mockResolvedValue(user);
-      mockBcrypt.compare.mockResolvedValue(false);
+      mockBcrypt.compare.mockResolvedValue(false as never);
 
       const result = await userService.verifyPassword(email, password);
 
@@ -312,8 +326,8 @@ describe('UserService', () => {
       };
 
       prismaMock.user.findUnique.mockResolvedValue(user);
-      mockBcrypt.compare.mockResolvedValue(true);
-      mockBcrypt.hash.mockResolvedValue('new-hashed-password');
+      mockBcrypt.compare.mockResolvedValue(true as never);
+      mockBcrypt.hash.mockResolvedValue('new-hashed-password' as never);
       prismaMock.user.update.mockResolvedValue({
         ...user,
         passwordHash: 'new-hashed-password',
@@ -347,7 +361,7 @@ describe('UserService', () => {
       };
 
       prismaMock.user.findUnique.mockResolvedValue(user);
-      mockBcrypt.compare.mockResolvedValue(false);
+      mockBcrypt.compare.mockResolvedValue(false as never);
 
       await expect(
         userService.updatePassword(userId, currentPassword, newPassword),
@@ -413,13 +427,13 @@ describe('UserService', () => {
         userId,
         name,
         token: 'hashed-token',
+        tokenPrefix: 'testpref',
         expiresAt: null,
         lastUsed: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
-      mockBcrypt.hash.mockResolvedValue('hashed-token');
       prismaMock.apiToken.create.mockResolvedValue(apiToken);
 
       const result = await userService.generateApiToken(userId, name);
@@ -429,7 +443,8 @@ describe('UserService', () => {
         data: {
           userId,
           name,
-          token: 'hashed-token',
+          token: 'sha256-hash',
+          tokenPrefix: expect.stringMatching(/^.{8}$/), // 8 character prefix
           expiresAt: undefined,
         },
       });
@@ -439,47 +454,58 @@ describe('UserService', () => {
   describe('validateApiToken', () => {
     test('should return user if token is valid', async () => {
       const token = 'valid-token';
-      const apiTokens = [
-        {
-          id: 'token-123',
-          userId: 'user-123',
-          name: 'Test Token',
-          token: 'hashed-token',
-          expiresAt: null,
-          lastUsed: null,
+      const apiToken = {
+        id: 'token-123',
+        userId: 'user-123',
+        name: 'Test Token',
+        token: 'sha256-hash', // This should match what our mocked crypto returns
+        tokenPrefix: 'testpref',
+        expiresAt: null,
+        lastUsed: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        user: {
+          id: 'user-123',
+          email: 'test@example.com',
+          passwordHash: 'hashed',
+          fullName: 'Test User',
+          role: UserRole.MEMBER,
+          organizationId: 'org-123',
+          emailVerified: true,
+          isActive: true,
+          totpEnabled: false,
+          totpSecret: null,
           createdAt: new Date(),
           updatedAt: new Date(),
-          user: {
-            id: 'user-123',
-            email: 'test@example.com',
-            passwordHash: 'hashed',
-            fullName: 'Test User',
-            role: UserRole.MEMBER,
-            organizationId: 'org-123',
-            emailVerified: true,
-            isActive: true,
-            totpEnabled: false,
-            totpSecret: null,
+          organization: {
+            id: 'org-123',
+            name: 'Test Organization',
+            ownerUserId: 'owner-123',
             createdAt: new Date(),
             updatedAt: new Date(),
-            organization: {
-              id: 'org-123',
-              name: 'Test Organization',
-              ownerUserId: 'owner-123',
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
           },
         },
-      ];
+      };
 
-      prismaMock.apiToken.findMany.mockResolvedValue(apiTokens);
-      mockBcrypt.compare.mockResolvedValue(true);
-      prismaMock.apiToken.update.mockResolvedValue(apiTokens[0]!);
+      prismaMock.apiToken.findFirst.mockResolvedValue(apiToken);
+      prismaMock.apiToken.update.mockResolvedValue(apiToken);
 
       const result = await userService.validateApiToken(token);
 
-      expect(result).toEqual(apiTokens[0]!.user);
+      expect(result).toEqual(apiToken.user);
+      expect(prismaMock.apiToken.findFirst).toHaveBeenCalledWith({
+        where: {
+          token: 'sha256-hash',
+          OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+        },
+        include: {
+          user: {
+            include: {
+              organization: true,
+            },
+          },
+        },
+      });
       expect(prismaMock.apiToken.update).toHaveBeenCalledWith({
         where: { id: 'token-123' },
         data: { lastUsed: expect.any(Date) },
@@ -488,46 +514,30 @@ describe('UserService', () => {
 
     test('should return null if token is invalid', async () => {
       const token = 'invalid-token';
-      const apiTokens = [
-        {
-          id: 'token-123',
-          userId: 'user-123',
-          name: 'Test Token',
-          token: 'hashed-token',
-          expiresAt: null,
-          lastUsed: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          user: {
-            id: 'user-123',
-            email: 'test@example.com',
-            passwordHash: 'hashed',
-            fullName: 'Test User',
-            role: UserRole.MEMBER,
-            organizationId: 'org-123',
-            emailVerified: true,
-            isActive: true,
-            totpEnabled: false,
-            totpSecret: null,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            organization: {
-              id: 'org-123',
-              name: 'Test Organization',
-              ownerUserId: 'owner-123',
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          },
-        },
-      ];
 
-      prismaMock.apiToken.findMany.mockResolvedValue(apiTokens);
-      mockBcrypt.compare.mockResolvedValue(false);
+      prismaMock.apiToken.findFirst.mockResolvedValue(null);
+      prismaMock.apiToken.findMany
+        .mockResolvedValueOnce([]) // First call for tokenPrefix
+        .mockResolvedValueOnce([]); // Second call for null tokenPrefix fallback
 
       const result = await userService.validateApiToken(token);
 
       expect(result).toBeNull();
+      expect(prismaMock.apiToken.findFirst).toHaveBeenCalledWith({
+        where: {
+          token: 'sha256-hash', // The mock will hash any input to this value
+          OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+        },
+        include: {
+          user: {
+            include: {
+              organization: true,
+            },
+          },
+        },
+      });
+      // Should try bcrypt fallback with tokenPrefix first, then null tokenPrefix
+      expect(prismaMock.apiToken.findMany).toHaveBeenCalledTimes(2);
     });
   });
 });

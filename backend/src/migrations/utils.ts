@@ -71,7 +71,7 @@ export async function loadLegacyData(filePath: string): Promise<LegacyDataExport
 
     // Read and parse JSON
     const rawData = await fs.readFile(filePath, 'utf-8');
-    const jsonData = JSON.parse(rawData);
+    const jsonData: unknown = JSON.parse(rawData);
 
     // Validate structure
     const validatedData = legacyDataExportSchema.parse(jsonData);

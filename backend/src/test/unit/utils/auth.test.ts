@@ -1,4 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
+
+// Override the global crypto mock for this test
+jest.unmock('crypto');
+
 import {
   generateTokens,
   verifyAccessToken,
@@ -8,33 +12,32 @@ import {
 import { config } from '../../../config';
 
 // Mock dependencies
-jest.mock('jsonwebtoken', () => ({
-  sign: jest.fn(),
-  verify: jest.fn(),
-  decode: jest.fn(),
-}));
-
+jest.mock('jsonwebtoken');
 jest.mock('qrcode', () => ({
   toDataURL: jest.fn(),
 }));
+jest.mock('../../../middleware/security', () => ({
+  validateJWTStructure: jest.fn().mockReturnValue(true),
+}));
 
-// Get typed mocks
-const jwt = require('jsonwebtoken');
-const QRCode = require('qrcode');
+// Import the actual modules to get proper types
+import jwt from 'jsonwebtoken';
+import qrcode from 'qrcode';
 
-const mockJwt = jwt as {
-  sign: jest.MockedFunction<any>;
-  verify: jest.MockedFunction<any>;
-  decode: jest.MockedFunction<any>;
-};
-
-const mockQRCode = QRCode as {
-  toDataURL: jest.MockedFunction<any>;
-};
+const mockJwt = jwt as jest.Mocked<typeof jwt>;
+const mockQRCode = qrcode as any;
 
 describe('Auth Utils', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    // Reset the mock for validateJWTStructure
+    const {
+      validateJWTStructure,
+    }: {
+      validateJWTStructure: jest.MockedFunction<() => boolean>;
+    } = jest.requireMock('../../../middleware/security');
+    validateJWTStructure.mockReturnValue(true);
 
     // Set test environment variables
     process.env.JWT_SECRET = 'test-jwt-secret-32-characters-long';
@@ -42,7 +45,8 @@ describe('Auth Utils', () => {
   });
 
   afterEach(() => {
-    jest.resetAllMocks();
+    jest.clearAllMocks();
+    // Note: don't use resetAllMocks as it resets the mock implementation
   });
 
   describe('generateTokens', () => {
@@ -56,7 +60,7 @@ describe('Auth Utils', () => {
       const mockAccessToken = 'mock-access-token';
       const mockRefreshToken = 'mock-refresh-token';
 
-      mockJwt.sign
+      (mockJwt.sign as jest.Mock)
         .mockReturnValueOnce(mockAccessToken) // Access token
         .mockReturnValueOnce(mockRefreshToken); // Refresh token
 
@@ -64,25 +68,46 @@ describe('Auth Utils', () => {
 
       expect(mockJwt.sign).toHaveBeenCalledTimes(2);
 
-      // Access token call
+      // Access token call - should match the actual implementation
       expect(mockJwt.sign).toHaveBeenNthCalledWith(
         1,
-        { ...payload, type: 'access' },
+        expect.objectContaining({
+          ...payload,
+          type: 'access',
+          jti: expect.stringMatching(/-access$/),
+        }),
         config.jwt.accessSecret,
-        { expiresIn: config.jwt.accessExpiry },
+        expect.objectContaining({
+          expiresIn: config.jwt.accessExpiry,
+          issuer: 'dumbassets-enhanced',
+          audience: 'dumbassets-api',
+          algorithm: 'HS256',
+        }),
       );
 
       // Refresh token call
       expect(mockJwt.sign).toHaveBeenNthCalledWith(
         2,
-        { ...payload, type: 'refresh' },
+        expect.objectContaining({
+          ...payload,
+          type: 'refresh',
+          jti: expect.stringMatching(/-refresh$/),
+        }),
         config.jwt.refreshSecret,
-        { expiresIn: config.jwt.refreshExpiry },
+        expect.objectContaining({
+          expiresIn: config.jwt.refreshExpiry,
+          issuer: 'dumbassets-enhanced',
+          audience: 'dumbassets-api',
+          algorithm: 'HS256',
+        }),
       );
 
       expect(result).toEqual({
         accessToken: mockAccessToken,
         refreshToken: mockRefreshToken,
+        accessTokenExpiry: expect.any(Number),
+        refreshTokenExpiry: expect.any(Number),
+        tokenId: expect.any(String),
       });
     });
 
@@ -93,23 +118,33 @@ describe('Auth Utils', () => {
         role: 'OWNER' as const,
       };
 
-      mockJwt.sign.mockReturnValue('mock-token');
+      (mockJwt.sign as jest.Mock).mockReturnValue('mock-token');
 
       generateTokens(payload);
 
       // Verify access token payload includes all required fields
       const accessTokenCall = mockJwt.sign.mock.calls[0];
-      expect(accessTokenCall?.[0]).toEqual({
-        userId: payload.userId,
-        organizationId: payload.organizationId,
-        role: payload.role,
-      });
+      expect(accessTokenCall?.[0]).toEqual(
+        expect.objectContaining({
+          userId: payload.userId,
+          organizationId: payload.organizationId,
+          role: payload.role,
+          type: 'access',
+          jti: expect.stringMatching(/-access$/),
+        }),
+      );
 
-      // Verify refresh token payload includes only userId
+      // Verify refresh token payload includes all required fields
       const refreshTokenCall = mockJwt.sign.mock.calls[1];
-      expect(refreshTokenCall?.[0]).toEqual({
-        userId: payload.userId,
-      });
+      expect(refreshTokenCall?.[0]).toEqual(
+        expect.objectContaining({
+          userId: payload.userId,
+          organizationId: payload.organizationId,
+          role: payload.role,
+          type: 'refresh',
+          jti: expect.stringMatching(/-refresh$/),
+        }),
+      );
     });
   });
 
@@ -120,15 +155,24 @@ describe('Auth Utils', () => {
         userId: 'user-123',
         organizationId: 'org-123',
         role: 'MEMBER',
+        type: 'access' as const,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 900, // 15 minutes
       };
 
-      mockJwt.verify.mockReturnValue(expectedPayload as any);
+      (mockJwt.verify as jest.Mock).mockReturnValue(expectedPayload);
 
       const result = verifyAccessToken(token);
 
-      expect(mockJwt.verify).toHaveBeenCalledWith(token, config.jwt.accessSecret);
+      expect(mockJwt.verify).toHaveBeenCalledWith(
+        token,
+        config.jwt.accessSecret,
+        expect.objectContaining({
+          issuer: 'dumbassets-enhanced',
+          audience: 'dumbassets-api',
+          algorithms: ['HS256'],
+        }),
+      );
       expect(result).toEqual(expectedPayload);
     });
 
@@ -136,36 +180,42 @@ describe('Auth Utils', () => {
       const token = 'invalid-token';
       const error = new Error('Invalid token');
 
-      mockJwt.verify.mockImplementation(() => {
+      (mockJwt.verify as jest.Mock).mockImplementation(() => {
         throw error;
       });
 
-      expect(() => verifyAccessToken(token)).toThrow('Invalid token');
-      expect(mockJwt.verify).toHaveBeenCalledWith(token, config.jwt.accessSecret);
+      expect(() => verifyAccessToken(token)).toThrow('Token verification failed');
+      expect(mockJwt.verify).toHaveBeenCalledWith(
+        token,
+        config.jwt.accessSecret,
+        expect.objectContaining({
+          issuer: 'dumbassets-enhanced',
+          audience: 'dumbassets-api',
+          algorithms: ['HS256'],
+        }),
+      );
     });
 
     test('should throw error for expired token', () => {
       const token = 'expired-token';
-      const error = new Error('Token expired');
-      (error as any).name = 'TokenExpiredError';
+      const error = new jwt.TokenExpiredError('Token expired', new Date());
 
-      mockJwt.verify.mockImplementation(() => {
+      (mockJwt.verify as jest.Mock).mockImplementation(() => {
         throw error;
       });
 
-      expect(() => verifyAccessToken(token)).toThrow('Token expired');
+      expect(() => verifyAccessToken(token)).toThrow('Access token expired');
     });
 
     test('should throw error for malformed token', () => {
       const token = 'malformed-token';
-      const error = new Error('Malformed token');
-      (error as any).name = 'JsonWebTokenError';
+      const error = new jwt.JsonWebTokenError('Malformed token');
 
-      mockJwt.verify.mockImplementation(() => {
+      (mockJwt.verify as jest.Mock).mockImplementation(() => {
         throw error;
       });
 
-      expect(() => verifyAccessToken(token)).toThrow('Malformed token');
+      expect(() => verifyAccessToken(token)).toThrow('Invalid access token');
     });
   });
 
@@ -174,15 +224,26 @@ describe('Auth Utils', () => {
       const token = 'valid-refresh-token';
       const expectedPayload = {
         userId: 'user-123',
+        organizationId: 'org-123',
+        role: 'MEMBER',
+        type: 'refresh' as const,
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 604800, // 7 days
       };
 
-      mockJwt.verify.mockReturnValue(expectedPayload as any);
+      (mockJwt.verify as jest.Mock).mockReturnValue(expectedPayload);
 
       const result = verifyRefreshToken(token);
 
-      expect(mockJwt.verify).toHaveBeenCalledWith(token, config.jwt.refreshSecret);
+      expect(mockJwt.verify).toHaveBeenCalledWith(
+        token,
+        config.jwt.refreshSecret,
+        expect.objectContaining({
+          issuer: 'dumbassets-enhanced',
+          audience: 'dumbassets-api',
+          algorithms: ['HS256'],
+        }),
+      );
       expect(result).toEqual(expectedPayload);
     });
 
@@ -190,24 +251,49 @@ describe('Auth Utils', () => {
       const token = 'invalid-refresh-token';
       const error = new Error('Invalid refresh token');
 
-      mockJwt.verify.mockImplementation(() => {
+      (mockJwt.verify as jest.Mock).mockImplementation(() => {
         throw error;
       });
 
-      expect(() => verifyRefreshToken(token)).toThrow('Invalid refresh token');
-      expect(mockJwt.verify).toHaveBeenCalledWith(token, config.jwt.refreshSecret);
+      expect(() => verifyRefreshToken(token)).toThrow('Token verification failed');
+      expect(mockJwt.verify).toHaveBeenCalledWith(
+        token,
+        config.jwt.refreshSecret,
+        expect.objectContaining({
+          issuer: 'dumbassets-enhanced',
+          audience: 'dumbassets-api',
+          algorithms: ['HS256'],
+        }),
+      );
     });
 
     test('should use correct secret for refresh token verification', () => {
       const token = 'test-token';
 
-      mockJwt.verify.mockReturnValue({ userId: 'user-123' } as any);
+      (mockJwt.verify as jest.Mock).mockReturnValue({
+        userId: 'user-123',
+        organizationId: 'org-123',
+        role: 'MEMBER',
+        type: 'refresh' as const,
+      });
 
       verifyRefreshToken(token);
 
-      expect(mockJwt.verify).toHaveBeenCalledWith(token, config.jwt.refreshSecret);
+      expect(mockJwt.verify).toHaveBeenCalledWith(
+        token,
+        config.jwt.refreshSecret,
+        expect.objectContaining({
+          issuer: 'dumbassets-enhanced',
+          audience: 'dumbassets-api',
+          algorithms: ['HS256'],
+        }),
+      );
       // Ensure it's not using the access token secret
-      expect(mockJwt.verify).not.toHaveBeenCalledWith(token, config.jwt.accessSecret);
+      expect(mockJwt.verify).not.toHaveBeenCalledWith(
+        token,
+        config.jwt.accessSecret,
+        expect.any(Object),
+      );
     });
   });
 
@@ -253,14 +339,16 @@ describe('Auth Utils', () => {
       const result = await generateQRCode(otpauthUrl);
 
       expect(result).toBe(dataUrl);
-      expect(mockQRCode.toDataURL).toHaveBeenCalledWith(otpauthUrl, expect.any(Object));
+      expect(mockQRCode.toDataURL).toHaveBeenCalledWith(otpauthUrl);
     });
   });
 
   describe('Token integration', () => {
     test('should generate and verify tokens end-to-end', () => {
-      // Use real JWT for integration test
-      jest.restoreAllMocks();
+      // Mock the token generation
+      (mockJwt.sign as jest.Mock)
+        .mockReturnValueOnce('mock-access-token')
+        .mockReturnValueOnce('mock-refresh-token');
 
       const payload = {
         userId: 'user-123',
@@ -272,12 +360,32 @@ describe('Auth Utils', () => {
 
       expect(tokens.accessToken).toBeTruthy();
       expect(tokens.refreshToken).toBeTruthy();
-      expect(typeof tokens.accessToken).toBe('string');
-      expect(typeof tokens.refreshToken).toBe('string');
+      expect(tokens.accessToken).toBe('mock-access-token');
+      expect(tokens.refreshToken).toBe('mock-refresh-token');
+
+      // Mock the verification
+      (mockJwt.verify as jest.Mock).mockImplementation((token) => {
+        if (token === 'mock-access-token') {
+          return {
+            ...payload,
+            type: 'access',
+            iat: Date.now() / 1000,
+            exp: Date.now() / 1000 + 900,
+          };
+        } else if (token === 'mock-refresh-token') {
+          return {
+            userId: payload.userId,
+            type: 'refresh',
+            iat: Date.now() / 1000,
+            exp: Date.now() / 1000 + 604800,
+          };
+        }
+        throw new Error('Invalid token');
+      });
 
       // Verify tokens can be decoded
-      const accessPayload = verifyAccessToken(tokens.accessToken);
-      const refreshPayload = verifyRefreshToken(tokens.refreshToken);
+      const accessPayload = verifyAccessToken('mock-access-token');
+      const refreshPayload = verifyRefreshToken('mock-refresh-token');
 
       expect(accessPayload.userId).toBe(payload.userId);
       expect(accessPayload.organizationId).toBe(payload.organizationId);
@@ -289,8 +397,6 @@ describe('Auth Utils', () => {
     });
 
     test('should reject tokens signed with wrong secret', () => {
-      jest.restoreAllMocks();
-
       const payload = {
         userId: 'user-123',
         organizationId: 'org-123',

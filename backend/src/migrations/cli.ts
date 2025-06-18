@@ -6,6 +6,97 @@ import path from 'path';
 import { dataMigrator } from './migrator';
 import type { MigrationOptions } from './types';
 
+// Interface for CLI arguments
+interface CliOptions {
+  file: string;
+  orgName?: string;
+  ownerEmail?: string;
+  ownerName?: string;
+  uploadPath?: string;
+  reportFile?: string;
+  dryRun?: boolean;
+  preserveIds?: boolean;
+  skipFileValidation?: boolean;
+  skipDuplicates?: boolean;
+  createDefaultTasks?: boolean;
+  logLevel?: string;
+}
+
+// Interface for validate command
+interface ValidateOptions {
+  file: string;
+}
+
+// Interface for generate command
+interface GenerateOptions {
+  output?: string;
+}
+
+// Type guard to validate CLI options
+function isValidCliOptions(options: unknown): options is CliOptions {
+  if (typeof options !== 'object' || options === null) {
+    return false;
+  }
+
+  const opts = options as Record<string, unknown>;
+
+  // Required field
+  if (typeof opts.file !== 'string') {
+    return false;
+  }
+
+  // Optional string fields
+  const optionalStringFields = [
+    'orgName',
+    'ownerEmail',
+    'ownerName',
+    'uploadPath',
+    'reportFile',
+    'logLevel',
+  ];
+  for (const field of optionalStringFields) {
+    if (opts[field] !== undefined && typeof opts[field] !== 'string') {
+      return false;
+    }
+  }
+
+  // Optional boolean fields
+  const optionalBooleanFields = [
+    'dryRun',
+    'preserveIds',
+    'skipFileValidation',
+    'skipDuplicates',
+    'createDefaultTasks',
+  ];
+  for (const field of optionalBooleanFields) {
+    if (opts[field] !== undefined && typeof opts[field] !== 'boolean') {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// Type guard for validate options
+function isValidValidateOptions(options: unknown): options is ValidateOptions {
+  if (typeof options !== 'object' || options === null) {
+    return false;
+  }
+
+  const opts = options as Record<string, unknown>;
+  return typeof opts.file === 'string';
+}
+
+// Type guard for generate options
+function isValidGenerateOptions(options: unknown): options is GenerateOptions {
+  if (typeof options !== 'object' || options === null) {
+    return false;
+  }
+
+  const opts = options as Record<string, unknown>;
+  return opts.output === undefined || typeof opts.output === 'string';
+}
+
 const program = new Command();
 
 program
@@ -28,10 +119,18 @@ program
   .option('--skip-duplicates', 'Skip assets with duplicate IDs')
   .option('--create-default-tasks', 'Create default maintenance tasks for assets without events')
   .option('--log-level <level>', 'Log level (error, warn, info, debug)', 'info')
-  .action(async (options) => {
+  .action(async (rawOptions: unknown) => {
     try {
       console.log('🚀 Starting DumbAssets Enhanced Migration');
       console.log('=====================================\n');
+
+      // Validate CLI options
+      if (!isValidCliOptions(rawOptions)) {
+        console.error('❌ Error: Invalid CLI options provided');
+        process.exit(1);
+      }
+
+      const options: CliOptions = rawOptions;
 
       // Validate file exists
       const jsonFilePath = path.resolve(options.file);
@@ -59,7 +158,7 @@ program
         skipFileValidation: options.skipFileValidation || false,
         skipDuplicateAssets: options.skipDuplicates || false,
         createDefaultTasks: options.createDefaultTasks || false,
-        logLevel: options.logLevel || 'info',
+        logLevel: (options.logLevel || 'info') as 'error' | 'warn' | 'info' | 'debug',
       };
 
       console.log('📋 Migration Configuration:');
@@ -167,10 +266,17 @@ program
   .command('validate')
   .description('Validate DumbAssets JSON export file without migrating')
   .requiredOption('-f, --file <path>', 'Path to DumbAssets JSON export file')
-  .action(async (options) => {
+  .action(async (rawOptions: unknown) => {
     try {
       console.log('🔍 Validating DumbAssets JSON export...\n');
 
+      // Validate CLI options
+      if (!isValidValidateOptions(rawOptions)) {
+        console.error('❌ Error: Invalid validate options provided');
+        process.exit(1);
+      }
+
+      const options: ValidateOptions = rawOptions;
       const jsonFilePath = path.resolve(options.file);
 
       // Use the loadLegacyData function for validation
@@ -205,9 +311,17 @@ program
   .command('example')
   .description('Generate example DumbAssets JSON export file')
   .option('-o, --output <path>', 'Output file path', './example-dumbassets-export.json')
-  .action(async (options) => {
+  .action(async (rawOptions: unknown) => {
     try {
       console.log('📝 Generating example DumbAssets JSON export...\n');
+
+      // Validate CLI options
+      if (!isValidGenerateOptions(rawOptions)) {
+        console.error('❌ Error: Invalid generate options provided');
+        process.exit(1);
+      }
+
+      const options: GenerateOptions = rawOptions;
 
       const exampleData = {
         version: '1.0',
@@ -337,7 +451,7 @@ program
         },
       };
 
-      const outputPath = path.resolve(options.output);
+      const outputPath = path.resolve(options.output || './example-dumbassets-export.json');
       await fs.writeFile(outputPath, JSON.stringify(exampleData, null, 2), 'utf-8');
 
       console.log(`✅ Example file generated: ${outputPath}`);

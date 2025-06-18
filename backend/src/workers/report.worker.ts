@@ -44,7 +44,7 @@ export async function processReportJob(job: Job<ReportJob>): Promise<{
         break;
 
       default:
-        throw new Error(`Unknown report type: ${data.type}`);
+        throw new Error(`Unknown report type: ${String(data.type)}`);
     }
 
     await job.updateProgress(80);
@@ -73,15 +73,15 @@ export async function processReportJob(job: Job<ReportJob>): Promise<{
       fileSize,
       recordCount,
     };
-  } catch (err) {
-    logger.error('Failed to process report job', {
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err : new Error(String(err));
+    logger.error('Failed to process report job', error, {
       jobId: job.id,
-      error: err instanceof Error ? err.message : String(err),
       type: data.type,
       userId: data.userId,
       format: data.format,
     });
-    throw err;
+    throw error;
   }
 }
 

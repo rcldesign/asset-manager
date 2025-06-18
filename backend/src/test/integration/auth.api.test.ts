@@ -1,32 +1,54 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import type { Application } from 'express';
+import type Redis from 'ioredis';
+import * as speakeasy from 'speakeasy';
+
 import {
   createTestApp,
   setupTestDatabase,
   cleanupTestDatabase,
+  setupTestEnvironment,
   testDataGenerators,
   integrationAssertions,
 } from './app.setup';
 import type { TestDatabaseHelper } from '../helpers';
 import { TestAPIHelper } from '../helpers';
+import { getRedis } from '../../lib/redis';
+import { _test_only_resetFailedAttempts } from '../../middleware/auth';
 
 describe('Authentication API Integration Tests', () => {
   let app: Application;
   let api: TestAPIHelper;
   let dbHelper: TestDatabaseHelper;
+  let redisClient: Redis;
 
   beforeAll(async () => {
+    setupTestEnvironment();
     app = createTestApp();
-    api = new TestAPIHelper(app);
     dbHelper = await setupTestDatabase();
+
+    // Get the app's Redis client instead of creating a new one
+    redisClient = getRedis();
   });
 
   afterAll(async () => {
     await cleanupTestDatabase(dbHelper);
+    // Redis cleanup is now handled globally in test/setup.ts
+    // Timer cleanup is also handled globally
   });
 
   beforeEach(async () => {
+    jest.clearAllMocks(); // Reset all mock state between tests
+
+    api = new TestAPIHelper(app); // Re-create the helper for each test
     await dbHelper.clearDatabase();
+    // Flush Redis to ensure test isolation
+    await redisClient.flushdb();
+    _test_only_resetFailedAttempts(); // Reset the rate-limiter state
+  });
+
+  afterEach(() => {
+    // Mock cleanup is handled by jest.clearAllMocks() in beforeEach
   });
 
   describe('POST /api/auth/register', () => {
@@ -88,9 +110,9 @@ describe('Authentication API Integration Tests', () => {
       const response = await api.request
         .post('/api/auth/register')
         .send(duplicateUserData)
-        .expect(400);
+        .expect(409);
 
-      integrationAssertions.expectErrorResponse(response, 400);
+      integrationAssertions.expectErrorResponse(response, 409);
     });
 
     test('should reject registration without required fields', async () => {
@@ -122,9 +144,9 @@ describe('Authentication API Integration Tests', () => {
     test('should reject login with invalid email', async () => {
       const loginData = testDataGenerators.validLogin('nonexistent@example.com');
 
-      const response = await api.request.post('/api/auth/login').send(loginData).expect(400);
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(401);
 
-      integrationAssertions.expectErrorResponse(response, 400);
+      integrationAssertions.expectErrorResponse(response, 401);
     });
 
     test('should reject login with invalid password', async () => {
@@ -138,15 +160,18 @@ describe('Authentication API Integration Tests', () => {
         password: 'WrongPassword123!',
       };
 
-      const response = await api.request.post('/api/auth/login').send(loginData).expect(400);
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(401);
 
-      integrationAssertions.expectErrorResponse(response, 400);
+      integrationAssertions.expectErrorResponse(response, 401);
     });
 
     test('should require 2FA when enabled', async () => {
       // Register and login user
       const userData = testDataGenerators.validUser();
-      const registerResponse = await api.request.post('/api/auth/register').send(userData);
+      const registerResponse = await api.request
+        .post('/api/auth/register')
+        .send(userData)
+        .expect(201);
 
       const { accessToken } = registerResponse.body.tokens;
 
@@ -157,12 +182,19 @@ describe('Authentication API Integration Tests', () => {
         .expect(200);
 
       expect(setupResponse.body).toHaveProperty('secret');
+      const { secret } = setupResponse.body;
 
-      // Enable 2FA (mock valid token)
+      // Enable 2FA with real TOTP token generated for current time
+      const currentTimeSeconds = Math.floor(Date.now() / 1000);
+      const validTOTPToken = speakeasy.totp({
+        secret: secret,
+        encoding: 'base32',
+        time: currentTimeSeconds,
+      });
       await api
         .authenticatedRequest(accessToken)
         .post('/api/auth/2fa/enable')
-        .send({ totpToken: '123456' })
+        .send({ totpToken: validTOTPToken })
         .expect(200);
 
       // Now try to login - should require 2FA
@@ -172,6 +204,95 @@ describe('Authentication API Integration Tests', () => {
       expect(response.body).toHaveProperty('requiresTwoFactor', true);
       expect(response.body).toHaveProperty('message');
       expect(response.body).not.toHaveProperty('tokens');
+    });
+
+    test('should authenticate with valid TOTP token', async () => {
+      // Register user and enable 2FA
+      const userData = testDataGenerators.validUser();
+      const registerResponse = await api.request
+        .post('/api/auth/register')
+        .send(userData)
+        .expect(201);
+
+      const { accessToken } = registerResponse.body.tokens;
+
+      // Setup 2FA
+      const setupResponse = await api
+        .authenticatedRequest(accessToken)
+        .post('/api/auth/2fa/setup')
+        .expect(200);
+
+      const { secret } = setupResponse.body;
+
+      // Enable 2FA with real TOTP token
+      const currentTimeSeconds1 = Math.floor(Date.now() / 1000);
+      const validTOTPToken = speakeasy.totp({
+        secret: secret,
+        encoding: 'base32',
+        time: currentTimeSeconds1,
+      });
+      await api
+        .authenticatedRequest(accessToken)
+        .post('/api/auth/2fa/enable')
+        .send({ totpToken: validTOTPToken })
+        .expect(200);
+
+      // Now login with valid TOTP token - should succeed
+      const currentTimeSeconds2 = Math.floor(Date.now() / 1000);
+      const loginTOTPToken = speakeasy.totp({
+        secret: secret,
+        encoding: 'base32',
+        time: currentTimeSeconds2,
+      });
+      const loginData = {
+        ...testDataGenerators.validLogin(userData.email),
+        totpToken: loginTOTPToken,
+      };
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(200);
+
+      expect(response.body).toHaveProperty('user');
+      expect(response.body).toHaveProperty('tokens');
+      expect(response.body).not.toHaveProperty('requiresTwoFactor');
+    });
+
+    test('should reject login with invalid TOTP token', async () => {
+      // Register user and enable 2FA
+      const userData = testDataGenerators.validUser();
+      const registerResponse = await api.request
+        .post('/api/auth/register')
+        .send(userData)
+        .expect(201);
+
+      const { accessToken } = registerResponse.body.tokens;
+
+      // Setup and enable 2FA
+      const setupResponse = await api
+        .authenticatedRequest(accessToken)
+        .post('/api/auth/2fa/setup')
+        .expect(200);
+
+      const { secret } = setupResponse.body;
+
+      const currentTimeSeconds = Math.floor(Date.now() / 1000);
+      const validTOTPToken = speakeasy.totp({
+        secret: secret,
+        encoding: 'base32',
+        time: currentTimeSeconds,
+      });
+      await api
+        .authenticatedRequest(accessToken)
+        .post('/api/auth/2fa/enable')
+        .send({ totpToken: validTOTPToken })
+        .expect(200);
+
+      // Try to login with invalid TOTP token - should fail
+      const loginData = {
+        ...testDataGenerators.validLogin(userData.email),
+        totpToken: '000000', // Invalid token
+      };
+      const response = await api.request.post('/api/auth/login').send(loginData).expect(401);
+
+      integrationAssertions.expectErrorResponse(response, 401);
     });
 
     test('should reject login with invalid request format', async () => {
@@ -209,9 +330,9 @@ describe('Authentication API Integration Tests', () => {
       const response = await api.request
         .post('/api/auth/refresh')
         .send({ refreshToken: 'invalid-token' })
-        .expect(400);
+        .expect(401);
 
-      integrationAssertions.expectErrorResponse(response, 400);
+      integrationAssertions.expectErrorResponse(response, 401);
     });
 
     test('should reject refresh without token', async () => {

@@ -1,6 +1,6 @@
 import type { User } from '@prisma/client';
 import jwt from 'jsonwebtoken';
-import speakeasy from 'speakeasy';
+import * as speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
 import { prisma } from '../lib/prisma';
 import { UserService } from './user.service';
@@ -72,10 +72,14 @@ export class AuthService {
   /**
    * Authenticate user with email/password and optional TOTP
    * @param credentials - User login credentials including email, password, and optional TOTP code
+   * @param timeForTesting - Optional time override for TOTP verification (testing only)
    * @returns Object containing user data, auth tokens, and TOTP requirement flag
    * @throws {AuthenticationError} When credentials are invalid or account is deactivated
    */
-  async authenticate(credentials: LoginCredentials): Promise<{
+  async authenticate(
+    credentials: LoginCredentials,
+    timeForTesting?: number,
+  ): Promise<{
     user: User;
     tokens: TokenPair;
     requiresTOTP?: boolean;
@@ -112,6 +116,7 @@ export class AuthService {
         encoding: 'base32',
         token: totpCode,
         window: 1, // Allow 1 step before/after for clock skew
+        time: timeForTesting, // Will be undefined in prod, which is what we want
       });
 
       if (!isValidTOTP) {
@@ -303,10 +308,11 @@ export class AuthService {
    * Enable TOTP after verifying the setup code
    * @param userId - ID of the user to enable TOTP for
    * @param totpCode - 6-digit TOTP code for verification
+   * @param timeForTesting - Optional time override for TOTP verification (testing only)
    * @throws {AppError} When user is not found
    * @throws {ValidationError} When TOTP setup not initiated, already enabled, or code is invalid
    */
-  async enableTOTP(userId: string, totpCode: string): Promise<void> {
+  async enableTOTP(userId: string, totpCode: string, timeForTesting?: number): Promise<void> {
     const user = await this.userService.getUserById(userId);
     if (!user) {
       throw new AppError('User not found', 404);
@@ -326,6 +332,7 @@ export class AuthService {
       encoding: 'base32',
       token: totpCode,
       window: 2, // Allow wider window for initial setup
+      time: timeForTesting, // Will be undefined in prod, which is what we want
     });
 
     if (!isValid) {
