@@ -17,6 +17,13 @@ import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import organizationRoutes from './routes/organizations';
 import oidcRoutes from './routes/oidc';
+import assetRoutes from './routes/assets';
+import assetAttachmentRoutes from './routes/asset-attachments';
+import assetTemplateRoutes from './routes/asset-templates';
+import taskRoutes from './routes/tasks';
+import scheduleRoutes from './routes/schedules';
+import notificationRoutes from './routes/notifications';
+import locationRoutes from './routes/locations';
 import {
   securityHeaders,
   generalRateLimit,
@@ -152,6 +159,13 @@ app.use('/api/auth', authRoutes);
 app.use('/api/oidc', oidcRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/organizations', organizationRoutes);
+app.use('/api/locations', locationRoutes);
+app.use('/api/asset-templates', assetTemplateRoutes);
+app.use('/api/assets', assetAttachmentRoutes); // Asset attachment routes under /api/assets (must come first)
+app.use('/api/assets', assetRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/schedules', scheduleRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 404 handler - creates error and passes to error handler
 app.use((req, _res, next) => {
