@@ -32,21 +32,29 @@ const sessionStore = new Map<
 >();
 
 // Clean up expired sessions (older than 10 minutes)
-const cleanupInterval = setInterval(
-  () => {
-    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
-    for (const [key, session] of sessionStore.entries()) {
-      if (session.timestamp < tenMinutesAgo) {
-        sessionStore.delete(key);
+let cleanupInterval: NodeJS.Timeout | undefined;
+
+// Only start cleanup interval if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  cleanupInterval = setInterval(
+    () => {
+      const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+      for (const [key, session] of sessionStore.entries()) {
+        if (session.timestamp < tenMinutesAgo) {
+          sessionStore.delete(key);
+        }
       }
-    }
-  },
-  5 * 60 * 1000,
-); // Run every 5 minutes
+    },
+    5 * 60 * 1000,
+  ); // Run every 5 minutes
+}
 
 // Export for testing purposes to stop the interval timer
 export const _test_only_stopOidcCleanupInterval = (): void => {
-  clearInterval(cleanupInterval);
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = undefined;
+  }
 };
 
 /**

@@ -5,10 +5,13 @@ export default {
   displayName: 'integration',
   testMatch: ['<rootDir>/src/test/integration/**/*.test.ts', '<rootDir>/src/test/e2e/**/*.test.ts'],
   globalSetup: '<rootDir>/src/test/integration/global-setup.ts',
+  globalTeardown: '<rootDir>/src/test/global-teardown.ts',
   // Override setup files to exclude prisma-singleton mock for integration tests
   setupFilesAfterEnv: [
+    '<rootDir>/src/test/env-setup.ts',
     '<rootDir>/src/test/integration/jest-setup.ts',
-    '<rootDir>/src/test/setup.ts'
+    '<rootDir>/src/test/setup.ts',
+    '<rootDir>/src/test/integration-setup.ts'
   ],
   // Override moduleNameMapper to ensure real modules are used
   moduleNameMapper: {

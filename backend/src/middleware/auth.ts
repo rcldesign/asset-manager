@@ -26,17 +26,22 @@ export interface AuthenticatedRequest extends Request {
 const failedAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
 // Clean up old failed attempt records
-const cleanupInterval = setInterval(
-  () => {
-    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
-    for (const [key, attempt] of failedAttempts.entries()) {
-      if (attempt.lastAttempt < cutoff) {
-        failedAttempts.delete(key);
+let cleanupInterval: NodeJS.Timeout | undefined;
+
+// Only start cleanup interval if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  cleanupInterval = setInterval(
+    () => {
+      const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+      for (const [key, attempt] of failedAttempts.entries()) {
+        if (attempt.lastAttempt < cutoff) {
+          failedAttempts.delete(key);
+        }
       }
-    }
-  },
-  10 * 60 * 1000,
-); // Run every 10 minutes
+    },
+    10 * 60 * 1000,
+  ); // Run every 10 minutes
+}
 
 // Export for testing purposes to reset state between tests
 export const _test_only_resetFailedAttempts = (): void => {
@@ -45,7 +50,10 @@ export const _test_only_resetFailedAttempts = (): void => {
 
 // Export for testing purposes to stop the interval timer
 export const _test_only_stopCleanupInterval = (): void => {
-  clearInterval(cleanupInterval);
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = undefined;
+  }
 };
 
 const userService = new UserService();

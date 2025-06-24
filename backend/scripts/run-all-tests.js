@@ -25,7 +25,7 @@ try {
   execSync('npm run test:db:start && npm run test:db:wait && npm run test:db:migrate', { 
     stdio: 'inherit' 
   });
-  execSync('jest --config jest.integration.config.ts --json --outputFile=integration-test-results.json', { 
+  execSync('jest --config jest.integration.config.ts --json --outputFile=integration-test-results.json --forceExit', { 
     stdio: 'inherit' 
   });
 } catch (error) {
