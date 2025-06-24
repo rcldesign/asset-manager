@@ -19,13 +19,20 @@ export function validateRequest(schema: {
       }
 
       if (schema.query) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        req.query = schema.query.parse(req.query);
+        // Parse and validate query
+        const parsedQuery = schema.query.parse(req.query);
+        // Clear existing query and add parsed values
+        Object.keys(req.query).forEach(key => {
+          delete (req.query as any)[key];
+        });
+        Object.assign(req.query, parsedQuery);
       }
 
       if (schema.params) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        req.params = schema.params.parse(req.params);
+        // Parse and validate params
+        const parsedParams = schema.params.parse(req.params);
+        // Update params with parsed values
+        Object.assign(req.params, parsedParams);
       }
 
       next();

@@ -4,47 +4,14 @@
  */
 
 import { prisma } from '../lib/prisma';
-import { redisClient } from '../lib/redis';
+import { disconnectRedis } from '../lib/redis';
+import { closeQueues } from '../lib/queue';
 import { _test_only_resetFailedAttempts } from '../middleware/auth';
+import { _test_only_stopCleanupInterval } from '../middleware/auth';
+import { _test_only_stopOidcCleanupInterval } from '../routes/oidc';
 
-/**
- * Clear all data from the test database
- * Uses TRUNCATE with CASCADE to handle foreign key constraints
- */
-async function clearDatabase() {
-  try {
-    const tablenames = await prisma.$queryRaw<Array<{ tablename: string }>>`
-      SELECT tablename FROM pg_tables WHERE schemaname='public'
-    `;
-
-    const tables = tablenames
-      .map(({ tablename }) => tablename)
-      .filter((name) => name !== '_prisma_migrations');
-
-    for (const tablename of tables) {
-      await prisma.$executeRawUnsafe(
-        `TRUNCATE TABLE "public"."${tablename}" RESTART IDENTITY CASCADE;`,
-      );
-    }
-  } catch (error) {
-    console.error('Error clearing database:', error);
-    throw error;
-  }
-}
-
-/**
- * Clear Redis data for test isolation
- */
-async function clearRedis() {
-  try {
-    if (redisClient && redisClient.status === 'ready') {
-      await redisClient.flushdb();
-    }
-  } catch (error) {
-    console.error('Error clearing Redis:', error);
-    // Don't throw - Redis might not be required for all tests
-  }
-}
+// Removed clearDatabase and clearRedis functions
+// Integration tests should manage their own data cleanup
 
 /**
  * Reset all in-memory state
@@ -55,18 +22,30 @@ function resetInMemoryState() {
 }
 
 // Hook into Jest lifecycle
-beforeEach(async () => {
-  await Promise.all([clearDatabase(), clearRedis()]);
+// Don't clear database globally - let each test manage its own data
+beforeEach(() => {
+  // Only reset in-memory state between tests
   resetInMemoryState();
 });
 
 afterAll(async () => {
   try {
+    // Stop cleanup intervals
+    _test_only_stopCleanupInterval();
+    _test_only_stopOidcCleanupInterval();
+    
+    // Close all queues and their connections
+    await closeQueues();
+    
+    // Disconnect Redis
+    await disconnectRedis();
+    
+    // Disconnect Prisma
     await prisma.$disconnect();
-    if (redisClient) {
-      redisClient.disconnect();
-    }
+    
+    // Give connections time to fully close
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   } catch (error) {
     console.error('Error during teardown:', error);
   }
-});
+}, 30000);
