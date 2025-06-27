@@ -60,21 +60,47 @@ export interface SessionInfo {
 }
 
 /**
- * Authentication service providing user authentication, token management, and 2FA functionality
+ * Authentication service providing user authentication, token management, and 2FA functionality.
+ * Handles login/logout, JWT token generation/validation, and TOTP-based two-factor authentication.
+ * Integrates with session management for multi-device support.
+ *
+ * @class AuthService
  */
 export class AuthService {
   private userService: UserService;
 
+  /**
+   * Creates an instance of AuthService.
+   * Initializes UserService dependency for authentication operations.
+   */
   constructor() {
     this.userService = new UserService();
   }
 
   /**
-   * Authenticate user with email/password and optional TOTP
-   * @param credentials - User login credentials including email, password, and optional TOTP code
-   * @param timeForTesting - Optional time override for TOTP verification (testing only)
-   * @returns Object containing user data, auth tokens, and TOTP requirement flag
+   * Authenticate user with email/password and optional TOTP.
+   * Supports two-factor authentication flow with progressive verification.
+   *
+   * @param {LoginCredentials} credentials - User login credentials including email, password, and optional TOTP code
+   * @param {number} [timeForTesting] - Optional time override for TOTP verification (testing only)
+   * @returns {Promise<Object>} Object containing user data, auth tokens, and TOTP requirement flag
    * @throws {AuthenticationError} When credentials are invalid or account is deactivated
+   *
+   * @example
+   * // Initial login attempt
+   * const result = await authService.authenticate({
+   *   email: 'user@example.com',
+   *   password: 'SecurePass123!'
+   * });
+   *
+   * if (result.requiresTOTP) {
+   *   // Prompt for 2FA code and retry
+   *   const finalResult = await authService.authenticate({
+   *     email: 'user@example.com',
+   *     password: 'SecurePass123!',
+   *     totpCode: '123456'
+   *   });
+   * }
    */
   async authenticate(
     credentials: LoginCredentials,
@@ -131,10 +157,21 @@ export class AuthService {
   }
 
   /**
-   * Generate JWT access and refresh tokens for a user
-   * @param user - User object to generate tokens for
-   * @returns Token pair containing access token, refresh token, and expiry time
-   * @throws {AppError} When JWT secrets are not configured
+   * Generate JWT access and refresh tokens for a user.
+   * Creates a new session with token pair and stores in database.
+   *
+   * @param {User} user - User object to generate tokens for
+   * @returns {Promise<TokenPair>} Token pair containing access token, refresh token, and expiry time
+   * @throws {AppError} When JWT secrets are not configured (500)
+   *
+   * @example
+   * const tokens = await authService.generateTokens(user);
+   * // Returns:
+   * // {
+   * //   accessToken: 'eyJ...',
+   * //   refreshToken: 'eyJ...',
+   * //   expiresIn: 900 // 15 minutes in seconds
+   * // }
    */
   async generateTokens(user: User): Promise<TokenPair> {
     const jwtSecret = process.env.JWT_SECRET;
@@ -186,11 +223,21 @@ export class AuthService {
   }
 
   /**
-   * Refresh access token using a valid refresh token
-   * @param refreshToken - The refresh token to use for generating new tokens
-   * @returns New token pair
-   * @throws {AppError} When JWT refresh secret is not configured
+   * Refresh access token using a valid refresh token.
+   * Validates refresh token, checks session validity, and issues new token pair.
+   *
+   * @param {string} refreshToken - The refresh token to use for generating new tokens
+   * @returns {Promise<TokenPair>} New token pair
+   * @throws {AppError} When JWT refresh secret is not configured (500)
    * @throws {AuthenticationError} When refresh token is invalid or expired
+   *
+   * @example
+   * try {
+   *   const newTokens = await authService.refreshToken(oldRefreshToken);
+   *   // Use new tokens for subsequent requests
+   * } catch (error) {
+   *   // Refresh token expired - user must login again
+   * }
    */
   async refreshToken(refreshToken: string): Promise<TokenPair> {
     const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
@@ -234,11 +281,21 @@ export class AuthService {
   }
 
   /**
-   * Verify JWT access token and return associated user
-   * @param token - JWT access token to verify
-   * @returns User object if token is valid
-   * @throws {AppError} When JWT secret is not configured
+   * Verify JWT access token and return associated user.
+   * Validates token signature and expiry, then fetches user data.
+   *
+   * @param {string} token - JWT access token to verify
+   * @returns {Promise<User>} User object if token is valid
+   * @throws {AppError} When JWT secret is not configured (500)
    * @throws {AuthenticationError} When token is invalid or user is inactive
+   *
+   * @example
+   * // In middleware or route handler
+   * const authHeader = req.headers.authorization;
+   * const token = authHeader?.replace('Bearer ', '');
+   *
+   * const user = await authService.verifyToken(token);
+   * req.user = user;
    */
   async verifyToken(token: string): Promise<User> {
     const jwtSecret = process.env.JWT_SECRET;
@@ -264,12 +321,22 @@ export class AuthService {
   }
 
   /**
-   * Setup TOTP (Time-based One-Time Password) for a user
-   * @param userId - ID of the user to setup TOTP for
-   * @param appName - Name of the application for TOTP issuer (defaults to 'DumbAssets')
-   * @returns TOTP setup information including secret, QR code URL, and manual entry key
-   * @throws {AppError} When user is not found
+   * Setup TOTP (Time-based One-Time Password) for a user.
+   * Generates secret and QR code for authenticator app integration.
+   *
+   * @param {string} userId - ID of the user to setup TOTP for
+   * @param {string} [appName='DumbAssets'] - Name of the application for TOTP issuer
+   * @returns {Promise<TOTPSetup>} TOTP setup information including secret, QR code URL, and manual entry key
+   * @throws {AppError} When user is not found (404)
    * @throws {ValidationError} When TOTP is already enabled for the user
+   *
+   * @example
+   * const setup = await authService.setupTOTP('user-123');
+   * // Display QR code to user
+   * res.json({
+   *   qrCode: setup.qrCodeUrl,
+   *   manualKey: setup.manualEntryKey
+   * });
    */
   async setupTOTP(userId: string, appName: string = 'DumbAssets'): Promise<TOTPSetup> {
     const user = await this.userService.getUserById(userId);
@@ -305,12 +372,24 @@ export class AuthService {
   }
 
   /**
-   * Enable TOTP after verifying the setup code
-   * @param userId - ID of the user to enable TOTP for
-   * @param totpCode - 6-digit TOTP code for verification
-   * @param timeForTesting - Optional time override for TOTP verification (testing only)
-   * @throws {AppError} When user is not found
+   * Enable TOTP after verifying the setup code.
+   * Confirms user has configured authenticator app correctly before enabling 2FA.
+   *
+   * @param {string} userId - ID of the user to enable TOTP for
+   * @param {string} totpCode - 6-digit TOTP code for verification
+   * @param {number} [timeForTesting] - Optional time override for TOTP verification (testing only)
+   * @returns {Promise<void>}
+   * @throws {AppError} When user is not found (404)
    * @throws {ValidationError} When TOTP setup not initiated, already enabled, or code is invalid
+   *
+   * @example
+   * // After user scans QR code and enters verification code
+   * try {
+   *   await authService.enableTOTP('user-123', '123456');
+   *   // 2FA now active for user
+   * } catch (error) {
+   *   // Invalid code - user should check authenticator app
+   * }
    */
   async enableTOTP(userId: string, totpCode: string, timeForTesting?: number): Promise<void> {
     const user = await this.userService.getUserById(userId);
@@ -347,12 +426,19 @@ export class AuthService {
   }
 
   /**
-   * Disable TOTP for a user after password verification
-   * @param userId - ID of the user to disable TOTP for
-   * @param password - User's current password for verification
-   * @throws {AppError} When user is not found
+   * Disable TOTP for a user after password verification.
+   * Requires password confirmation for security before removing 2FA.
+   *
+   * @param {string} userId - ID of the user to disable TOTP for
+   * @param {string} password - User's current password for verification
+   * @returns {Promise<void>}
+   * @throws {AppError} When user is not found (404)
    * @throws {ValidationError} When TOTP is not enabled
    * @throws {AuthenticationError} When password is invalid
+   *
+   * @example
+   * await authService.disableTOTP('user-123', 'CurrentPassword123!');
+   * // 2FA is now disabled for the user
    */
   async disableTOTP(userId: string, password: string): Promise<void> {
     const user = await this.userService.getUserById(userId);
@@ -381,8 +467,16 @@ export class AuthService {
   }
 
   /**
-   * Logout user by invalidating their refresh token
-   * @param refreshToken - The refresh token to invalidate
+   * Logout user by invalidating their refresh token.
+   * Removes the session associated with the refresh token.
+   *
+   * @param {string} refreshToken - The refresh token to invalidate
+   * @returns {Promise<void>}
+   *
+   * @example
+   * await authService.logout(req.cookies.refreshToken);
+   * res.clearCookie('refreshToken');
+   * res.json({ message: 'Logged out successfully' });
    */
   async logout(refreshToken: string): Promise<void> {
     await prisma.session.deleteMany({
@@ -391,8 +485,16 @@ export class AuthService {
   }
 
   /**
-   * Logout user from all devices by invalidating all their sessions
-   * @param userId - ID of the user to logout from all devices
+   * Logout user from all devices by invalidating all their sessions.
+   * Useful for security scenarios or password changes.
+   *
+   * @param {string} userId - ID of the user to logout from all devices
+   * @returns {Promise<void>}
+   *
+   * @example
+   * // After password change or security breach
+   * await authService.logoutAll('user-123');
+   * // User must re-authenticate on all devices
    */
   async logoutAll(userId: string): Promise<void> {
     await prisma.session.deleteMany({
@@ -401,9 +503,16 @@ export class AuthService {
   }
 
   /**
-   * Generate a password reset token for a user
-   * @param email - Email address of the user requesting password reset
-   * @returns Token string (always returns a value to prevent email enumeration)
+   * Generate a password reset token for a user.
+   * Always returns a token to prevent email enumeration attacks.
+   *
+   * @param {string} email - Email address of the user requesting password reset
+   * @returns {Promise<string>} Token string (always returns a value to prevent email enumeration)
+   *
+   * @example
+   * const token = await authService.generatePasswordResetToken('user@example.com');
+   * // Send token via email if user exists
+   * // Note: Always show success message to prevent email enumeration
    */
   async generatePasswordResetToken(email: string): Promise<string> {
     const user = await this.userService.findByEmail(email);
@@ -429,9 +538,19 @@ export class AuthService {
   }
 
   /**
-   * Validate a session token and return the associated user
-   * @param sessionToken - The session token to validate
-   * @returns User object if session is valid, null otherwise
+   * Validate a session token and return the associated user.
+   * Checks session existence and expiry before returning user data.
+   *
+   * @param {string} sessionToken - The session token to validate
+   * @returns {Promise<User | null>} User object if session is valid, null otherwise
+   *
+   * @example
+   * const user = await authService.validateSession(sessionToken);
+   * if (user) {
+   *   // Session is valid, proceed with authenticated request
+   * } else {
+   *   // Session expired or invalid
+   * }
    */
   async validateSession(sessionToken: string): Promise<User | null> {
     const session = await prisma.session.findUnique({
@@ -447,9 +566,19 @@ export class AuthService {
   }
 
   /**
-   * Get all active sessions for a user
-   * @param userId - ID of the user to get sessions for
-   * @returns Array of session information objects
+   * Get all active sessions for a user.
+   * Returns session metadata for device management.
+   *
+   * @param {string} userId - ID of the user to get sessions for
+   * @returns {Promise<SessionInfo[]>} Array of session information objects
+   *
+   * @example
+   * const sessions = await authService.getUserSessions('user-123');
+   * // Display to user:
+   * sessions.forEach(session => {
+   *   console.log(`Device logged in at ${session.createdAt}`);
+   *   console.log(`Token preview: ${session.tokenPreview}`);
+   * });
    */
   async getUserSessions(userId: string): Promise<SessionInfo[]> {
     const sessions = await prisma.session.findMany({
@@ -473,9 +602,17 @@ export class AuthService {
   }
 
   /**
-   * Revoke a specific session for a user
-   * @param userId - ID of the user who owns the session
-   * @param sessionId - ID of the session to revoke
+   * Revoke a specific session for a user.
+   * Allows users to logout specific devices/sessions.
+   *
+   * @param {string} userId - ID of the user who owns the session
+   * @param {string} sessionId - ID of the session to revoke
+   * @returns {Promise<void>}
+   *
+   * @example
+   * // User can logout a specific device
+   * await authService.revokeSession('user-123', 'session-456');
+   * // That device will need to login again
    */
   async revokeSession(userId: string, sessionId: string): Promise<void> {
     await prisma.session.deleteMany({

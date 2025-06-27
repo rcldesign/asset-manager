@@ -1,6 +1,4 @@
-import express, { type Application } from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
+import { type Application } from 'express';
 
 // We no longer use jest.mock for speakeasy - instead we use jest.spyOn in individual tests
 // This avoids the complexity of mocking functions that have both callable and property aspects
@@ -23,41 +21,14 @@ jest.mock('../../services/oidc.service', () => ({
   },
 }));
 
-import authRoutes from '../../routes/auth';
-import userRoutes from '../../routes/users';
-import organizationRoutes from '../../routes/organizations';
-import oidcRoutes from '../../routes/oidc';
-import { errorHandler, notFoundHandler } from '../../middleware/errorHandler';
+import app from '../../app';
 import { TestDatabaseHelper } from '../helpers';
 
 /**
  * Create test application with all routes and middleware
  */
 export function createTestApp(): Application {
-  const app = express();
-
-  // Basic middleware
-  app.use(helmet());
-  app.use(cors());
-  app.use(express.json({ limit: '10mb' }));
-
-  // Health check endpoint
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
-
-  // API routes
-  app.use('/api/auth', authRoutes);
-  app.use('/api/users', userRoutes);
-  app.use('/api/organizations', organizationRoutes);
-  app.use('/api/oidc', oidcRoutes);
-
-  // 404 handler for undefined routes
-  app.use(notFoundHandler);
-
-  // Error handling
-  app.use(errorHandler);
-
+  // Simply return the main app which already has all middleware and routes configured
   return app;
 }
 
@@ -79,6 +50,30 @@ export async function setupTestDatabase(): Promise<TestDatabaseHelper> {
 export async function cleanupTestDatabase(dbHelper: TestDatabaseHelper): Promise<void> {
   await dbHelper.clearDatabase();
   await dbHelper.disconnect();
+}
+
+/**
+ * Get test user and organization for integration tests
+ */
+export async function getTestUser(dbHelper: TestDatabaseHelper, organizationId?: string) {
+  const user = await dbHelper.createTestUser({
+    organizationId,
+    email: `test-${Date.now()}@example.com`,
+    password: 'password123',
+    role: 'MEMBER',
+  });
+
+  // Return the full user object from database
+  return await dbHelper.getPrisma().user.findUniqueOrThrow({
+    where: { id: user.id },
+  });
+}
+
+export async function getTestOrganization(dbHelper: TestDatabaseHelper) {
+  const org = await dbHelper.createTestOrganization();
+  return await dbHelper.getPrisma().organization.findUniqueOrThrow({
+    where: { id: org.id },
+  });
 }
 
 /**
@@ -111,6 +106,9 @@ export function setupTestEnvironment(): void {
   // Logging configuration
   process.env.LOG_LEVEL = 'error';
   process.env.ENABLE_METRICS = 'false';
+
+  // Disable workers during tests
+  process.env.DISABLE_WORKERS = 'true';
 
   // File upload configuration
   process.env.UPLOAD_DIR = './test-uploads';
@@ -148,6 +146,141 @@ export const testDataGenerators = {
   validApiToken: () => ({
     name: `Test Token ${Date.now()}`,
   }),
+
+  // Phase 2 generators using TestDatabaseHelper
+  organization: async (
+    dbHelper: TestDatabaseHelper,
+    data: Partial<{ name: string; ownerId: string }> = {},
+  ) => {
+    const result = await dbHelper.createTestOrganization(data);
+    return await dbHelper.getPrisma().organization.findUniqueOrThrow({
+      where: { id: result.id },
+    });
+  },
+
+  user: async (
+    dbHelper: TestDatabaseHelper,
+    data: Partial<{
+      email: string;
+      fullName: string;
+      role: 'OWNER' | 'MANAGER' | 'MEMBER';
+      organizationId: string;
+      password: string;
+      emailVerified: boolean;
+      totpEnabled: boolean;
+      isActive: boolean;
+    }> = {},
+  ) => {
+    const testUser = await dbHelper.createTestUser(data);
+    return await dbHelper.getPrisma().user.findUniqueOrThrow({
+      where: { id: testUser.id },
+    });
+  },
+
+  location: async (
+    dbHelper: TestDatabaseHelper,
+    data: {
+      organizationId: string;
+      name: string;
+      path: string;
+      description?: string;
+      parentId?: string;
+    },
+  ) => {
+    return await dbHelper.getPrisma().location.create({
+      data: {
+        organizationId: data.organizationId,
+        name: data.name,
+        path: data.path,
+        description: data.description,
+        parentId: data.parentId,
+      },
+    });
+  },
+
+  assetTemplate: async (
+    dbHelper: TestDatabaseHelper,
+    data: {
+      organizationId: string;
+      name: string;
+      category:
+        | 'HARDWARE'
+        | 'SOFTWARE'
+        | 'FURNITURE'
+        | 'VEHICLE'
+        | 'EQUIPMENT'
+        | 'PROPERTY'
+        | 'OTHER';
+      description?: string;
+      defaultFields?: Record<string, unknown>;
+    },
+  ) => {
+    return await dbHelper.getPrisma().assetTemplate.create({
+      data: {
+        organizationId: data.organizationId,
+        name: data.name,
+        category: data.category,
+        description: data.description,
+        defaultFields: data.defaultFields as any,
+      },
+    });
+  },
+
+  asset: async (
+    dbHelper: TestDatabaseHelper,
+    data: {
+      organizationId: string;
+      locationId: string;
+      name: string;
+      category:
+        | 'HARDWARE'
+        | 'SOFTWARE'
+        | 'FURNITURE'
+        | 'VEHICLE'
+        | 'EQUIPMENT'
+        | 'PROPERTY'
+        | 'OTHER';
+      status?: 'OPERATIONAL' | 'MAINTENANCE' | 'REPAIR' | 'RETIRED' | 'DISPOSED' | 'LOST';
+      description?: string;
+      serialNumber?: string;
+      modelNumber?: string;
+      manufacturer?: string;
+      purchaseDate?: Date;
+      purchasePrice?: number;
+      warrantyExpiry?: Date;
+      assetTemplateId?: string;
+      parentId?: string;
+      path?: string;
+      customFields?: Record<string, unknown>;
+      tags?: string[];
+      qrCode?: string;
+      link?: string;
+    },
+  ) => {
+    return await dbHelper.getPrisma().asset.create({
+      data: {
+        organizationId: data.organizationId,
+        locationId: data.locationId,
+        name: data.name,
+        category: data.category,
+        status: data.status || 'OPERATIONAL',
+        description: data.description,
+        serialNumber: data.serialNumber,
+        modelNumber: data.modelNumber,
+        manufacturer: data.manufacturer,
+        purchaseDate: data.purchaseDate,
+        purchasePrice: data.purchasePrice,
+        warrantyExpiry: data.warrantyExpiry,
+        assetTemplateId: data.assetTemplateId,
+        parentId: data.parentId,
+        path: data.path || `/asset-${Date.now()}`,
+        customFields: data.customFields as any,
+        tags: data.tags || [],
+        qrCode: data.qrCode,
+        link: data.link,
+      },
+    });
+  },
 };
 
 /**
@@ -161,6 +294,7 @@ export const integrationAssertions = {
     expect(user).toHaveProperty('organizationId');
     expect(user).toHaveProperty('emailVerified');
     expect(user).toHaveProperty('totpEnabled');
+    expect(user).toHaveProperty('notificationPreferences');
     expect(user).not.toHaveProperty('passwordHash');
     expect(user).not.toHaveProperty('totpSecret');
   },
@@ -208,3 +342,6 @@ export const integrationAssertions = {
     expect(response.body).not.toHaveProperty('error');
   },
 };
+
+// Re-export TestDatabaseHelper for convenience
+export { TestDatabaseHelper } from '../helpers';

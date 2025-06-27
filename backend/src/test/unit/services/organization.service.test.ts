@@ -3,6 +3,24 @@ import { UserRole } from '@prisma/client';
 import { prismaMock } from '../../prisma-singleton';
 import { OrganizationService } from '../../../services/organization.service';
 
+// Helper function to create a mock user with all required fields
+const createMockUser = (overrides: Partial<any> = {}) => ({
+  id: 'user-123',
+  email: 'test@example.com',
+  passwordHash: 'hashed-password',
+  fullName: 'Test User',
+  role: UserRole.MEMBER,
+  organizationId: 'org-123',
+  emailVerified: true,
+  isActive: true,
+  totpEnabled: false,
+  totpSecret: null,
+  notificationPreferences: {},
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
+
 describe('OrganizationService', () => {
   let organizationService: OrganizationService;
 
@@ -44,20 +62,13 @@ describe('OrganizationService', () => {
         ownerUserId: 'user-123',
         createdAt: new Date(),
         updatedAt: new Date(),
-        owner: {
+        owner: createMockUser({
           id: 'user-123',
           email: 'owner@example.com',
-          passwordHash: 'hashed',
           fullName: 'Owner User',
           role: UserRole.OWNER,
           organizationId,
-          emailVerified: true,
-          isActive: true,
-          totpEnabled: false,
-          totpSecret: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        }),
         _count: {
           users: 5,
           assets: 10,
@@ -111,20 +122,13 @@ describe('OrganizationService', () => {
       const updatedOrganization = {
         ...existingOrganization,
         name: updateData.name,
-        owner: {
+        owner: createMockUser({
           id: 'user-123',
           email: 'owner@example.com',
-          passwordHash: 'hashed',
           fullName: 'Owner User',
           role: UserRole.OWNER,
           organizationId,
-          emailVerified: true,
-          isActive: true,
-          totpEnabled: false,
-          totpSecret: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        }),
         _count: {
           users: 5,
           assets: 10,
@@ -179,20 +183,11 @@ describe('OrganizationService', () => {
         updatedAt: new Date(),
       };
 
-      const user = {
+      const user = createMockUser({
         id: userId,
         email: 'user@example.com',
-        passwordHash: 'hashed',
-        fullName: 'Test User',
-        role: UserRole.MEMBER,
         organizationId,
-        emailVerified: true,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      });
 
       prismaMock.organization.findUnique.mockResolvedValue(organization);
       prismaMock.user.findFirst.mockResolvedValue(user);
@@ -253,34 +248,20 @@ describe('OrganizationService', () => {
     test('should return organization members', async () => {
       const organizationId = 'org-123';
       const members = [
-        {
+        createMockUser({
           id: 'user-1',
           email: 'user1@example.com',
-          passwordHash: 'hashed',
           fullName: 'User 1',
           role: UserRole.MEMBER,
           organizationId,
-          emailVerified: true,
-          isActive: true,
-          totpEnabled: false,
-          totpSecret: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
+        }),
+        createMockUser({
           id: 'user-2',
           email: 'user2@example.com',
-          passwordHash: 'hashed',
           fullName: 'User 2',
           role: UserRole.MANAGER,
           organizationId,
-          emailVerified: true,
-          isActive: true,
-          totpEnabled: false,
-          totpSecret: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        }),
       ];
 
       prismaMock.user.findMany.mockResolvedValue(members);

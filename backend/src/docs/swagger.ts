@@ -39,6 +39,38 @@ const swaggerDefinition = {
       },
     },
     schemas: {
+      // Enums
+      UserRole: {
+        type: 'string',
+        enum: ['OWNER', 'MANAGER', 'MEMBER', 'VIEWER'],
+        description: 'User role within the organization',
+      },
+      TaskStatus: {
+        type: 'string',
+        enum: ['PLANNED', 'IN_PROGRESS', 'DONE', 'SKIPPED'],
+        description: 'Task status',
+      },
+      TaskPriority: {
+        type: 'string',
+        enum: ['HIGH', 'MEDIUM', 'LOW'],
+        description: 'Task priority level',
+      },
+      ScheduleType: {
+        type: 'string',
+        enum: ['ONE_OFF', 'FIXED_INTERVAL', 'CUSTOM'],
+        description: 'Schedule type',
+      },
+      AssetCategory: {
+        type: 'string',
+        enum: ['HARDWARE', 'SOFTWARE', 'FURNITURE', 'VEHICLE', 'EQUIPMENT', 'PROPERTY', 'OTHER'],
+        description: 'Asset category',
+      },
+      AssetStatus: {
+        type: 'string',
+        enum: ['OPERATIONAL', 'MAINTENANCE', 'REPAIR', 'RETIRED', 'DISPOSED', 'LOST'],
+        description: 'Asset operational status',
+      },
+      // Error schemas
       Error: {
         type: 'object',
         properties: {
@@ -116,6 +148,11 @@ const swaggerDefinition = {
             type: 'boolean',
             description: 'Whether the user account is active',
           },
+          notificationPreferences: {
+            type: 'object',
+            description: 'User notification preferences',
+            additionalProperties: true,
+          },
           createdAt: {
             type: 'string',
             format: 'date-time',
@@ -135,6 +172,7 @@ const swaggerDefinition = {
           'emailVerified',
           'totpEnabled',
           'isActive',
+          'notificationPreferences',
           'createdAt',
           'updatedAt',
         ],
@@ -187,6 +225,46 @@ const swaggerDefinition = {
             type: 'string',
             description: 'Asset name',
           },
+          category: {
+            type: 'string',
+            enum: [
+              'HARDWARE',
+              'SOFTWARE',
+              'FURNITURE',
+              'VEHICLE',
+              'EQUIPMENT',
+              'PROPERTY',
+              'OTHER',
+            ],
+            description: 'Asset category',
+          },
+          status: {
+            type: 'string',
+            enum: ['OPERATIONAL', 'MAINTENANCE', 'REPAIR', 'RETIRED', 'DISPOSED', 'LOST'],
+            description: 'Asset status',
+          },
+          assetTemplateId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Asset template ID',
+          },
+          locationId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Location ID where the asset is located',
+          },
+          parentId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Parent asset ID for asset hierarchy',
+          },
+          path: {
+            type: 'string',
+            description: 'Materialized path for efficient querying',
+          },
           manufacturer: {
             type: 'string',
             nullable: true,
@@ -204,7 +282,7 @@ const swaggerDefinition = {
           },
           purchaseDate: {
             type: 'string',
-            format: 'date',
+            format: 'date-time',
             nullable: true,
             description: 'Asset purchase date',
           },
@@ -238,13 +316,30 @@ const swaggerDefinition = {
           },
           warrantyExpiry: {
             type: 'string',
-            format: 'date',
+            format: 'date-time',
             nullable: true,
             description: 'Warranty expiry date',
           },
           warrantyLifetime: {
             type: 'boolean',
             description: 'Whether the asset has lifetime warranty',
+          },
+          secondaryWarrantyScope: {
+            type: 'string',
+            nullable: true,
+            description: 'Secondary warranty scope description',
+          },
+          secondaryWarrantyExpiry: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'Secondary warranty expiry date',
+          },
+          customFields: {
+            type: 'object',
+            nullable: true,
+            description: 'Custom fields for the asset',
+            additionalProperties: true,
           },
           photoPath: {
             type: 'string',
@@ -261,6 +356,11 @@ const swaggerDefinition = {
             nullable: true,
             description: 'Path to asset manual',
           },
+          qrCode: {
+            type: 'string',
+            nullable: true,
+            description: 'QR code for the asset',
+          },
           createdAt: {
             type: 'string',
             format: 'date-time',
@@ -276,6 +376,9 @@ const swaggerDefinition = {
           'id',
           'organizationId',
           'name',
+          'category',
+          'status',
+          'path',
           'tags',
           'warrantyLifetime',
           'createdAt',
@@ -300,6 +403,12 @@ const swaggerDefinition = {
             format: 'uuid',
             nullable: true,
             description: 'Asset ID the task is related to',
+          },
+          scheduleId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Schedule ID the task was created from',
           },
           title: {
             type: 'string',
@@ -478,6 +587,1063 @@ const swaggerDefinition = {
         },
         required: ['id', 'name', 'createdAt'],
       },
+      AssetTemplate: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Asset template unique identifier',
+          },
+          organizationId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Organization ID the template belongs to',
+          },
+          name: {
+            type: 'string',
+            description: 'Template name',
+          },
+          category: {
+            type: 'string',
+            enum: [
+              'HARDWARE',
+              'SOFTWARE',
+              'FURNITURE',
+              'VEHICLE',
+              'EQUIPMENT',
+              'PROPERTY',
+              'OTHER',
+            ],
+            description: 'Asset category',
+          },
+          description: {
+            type: 'string',
+            nullable: true,
+            description: 'Template description',
+          },
+          defaultFields: {
+            type: 'object',
+            description: 'Default fields for assets created from this template',
+            additionalProperties: true,
+          },
+          customFields: {
+            type: 'object',
+            description: 'Custom field definitions for this template',
+            additionalProperties: true,
+          },
+          isActive: {
+            type: 'boolean',
+            description: 'Whether the template is active',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Template creation timestamp',
+          },
+          updatedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Template last update timestamp',
+          },
+        },
+        required: [
+          'id',
+          'organizationId',
+          'name',
+          'category',
+          'defaultFields',
+          'customFields',
+          'isActive',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
+      Location: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Location unique identifier',
+          },
+          organizationId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Organization ID the location belongs to',
+          },
+          name: {
+            type: 'string',
+            description: 'Location name',
+          },
+          description: {
+            type: 'string',
+            nullable: true,
+            description: 'Location description',
+          },
+          parentId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Parent location ID for hierarchy',
+          },
+          path: {
+            type: 'string',
+            description: 'Materialized path for efficient querying',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Location creation timestamp',
+          },
+          updatedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Location last update timestamp',
+          },
+        },
+        required: ['id', 'organizationId', 'name', 'path', 'createdAt', 'updatedAt'],
+      },
+      Schedule: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Schedule unique identifier',
+          },
+          organizationId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Organization ID the schedule belongs to',
+          },
+          assetId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Asset ID the schedule is associated with',
+          },
+          name: {
+            type: 'string',
+            description: 'Schedule name',
+          },
+          description: {
+            type: 'string',
+            nullable: true,
+            description: 'Schedule description',
+          },
+          scheduleType: {
+            type: 'string',
+            enum: ['ONE_OFF', 'FIXED_INTERVAL', 'CUSTOM'],
+            description: 'Schedule type',
+          },
+          type: {
+            type: 'string',
+            nullable: true,
+            description: 'Additional type field for new schedule types',
+          },
+          startDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Schedule start date',
+          },
+          endDate: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'Schedule end date',
+          },
+          intervalDays: {
+            type: 'integer',
+            nullable: true,
+            description: 'Interval in days for fixed interval schedules',
+          },
+          intervalMonths: {
+            type: 'integer',
+            nullable: true,
+            description: 'Interval in months for fixed interval schedules',
+          },
+          customRrule: {
+            type: 'string',
+            nullable: true,
+            description: 'Custom RRULE for complex schedules',
+          },
+          recurrenceRule: {
+            type: 'string',
+            nullable: true,
+            description: 'Recurrence rule for calendar-based schedules',
+          },
+          monthlyDayOfMonth: {
+            type: 'integer',
+            nullable: true,
+            minimum: 1,
+            maximum: 31,
+            description: 'Day of month for monthly schedules',
+          },
+          seasonalMonths: {
+            type: 'array',
+            nullable: true,
+            items: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 12,
+            },
+            description: 'Array of months for seasonal schedules',
+          },
+          usageThreshold: {
+            type: 'number',
+            nullable: true,
+            description: 'Usage threshold for usage-based schedules',
+          },
+          currentUsage: {
+            type: 'number',
+            nullable: true,
+            description: 'Current usage for usage-based schedules',
+          },
+          lastRunAt: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'When tasks were last generated',
+          },
+          nextRunAt: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'When tasks will next be generated',
+          },
+          nextOccurrence: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'Next scheduled occurrence',
+          },
+          lastOccurrence: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'Last scheduled occurrence',
+          },
+          isActive: {
+            type: 'boolean',
+            description: 'Whether the schedule is active',
+          },
+          taskTemplate: {
+            type: 'object',
+            description: 'Template for creating tasks',
+            additionalProperties: true,
+          },
+          autoCreateAdvance: {
+            type: 'integer',
+            description: 'Days in advance to create tasks',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Schedule creation timestamp',
+          },
+          updatedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Schedule last update timestamp',
+          },
+        },
+        required: [
+          'id',
+          'organizationId',
+          'name',
+          'scheduleType',
+          'startDate',
+          'isActive',
+          'taskTemplate',
+          'autoCreateAdvance',
+          'createdAt',
+          'updatedAt',
+        ],
+      },
+      Notification: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Notification unique identifier',
+          },
+          organizationId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Organization ID the notification belongs to',
+          },
+          userId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'User ID the notification is for',
+          },
+          assetId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Related asset ID',
+          },
+          taskId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Related task ID',
+          },
+          scheduleId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Related schedule ID',
+          },
+          type: {
+            type: 'string',
+            description: 'Notification type',
+          },
+          title: {
+            type: 'string',
+            description: 'Notification title',
+          },
+          message: {
+            type: 'string',
+            description: 'Notification message',
+          },
+          data: {
+            type: 'object',
+            nullable: true,
+            description: 'Additional notification data',
+            additionalProperties: true,
+          },
+          isRead: {
+            type: 'boolean',
+            description: 'Whether the notification has been read',
+          },
+          readAt: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'When the notification was read',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Notification creation timestamp',
+          },
+        },
+        required: [
+          'id',
+          'organizationId',
+          'userId',
+          'type',
+          'title',
+          'message',
+          'isRead',
+          'createdAt',
+        ],
+      },
+      AssetAttachment: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Attachment unique identifier',
+          },
+          assetId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Asset ID the attachment belongs to',
+          },
+          uploadedByUserId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'User ID who uploaded the attachment',
+          },
+          originalFilename: {
+            type: 'string',
+            description: 'Original filename',
+          },
+          storedFilename: {
+            type: 'string',
+            description: 'Stored filename on disk',
+          },
+          filePath: {
+            type: 'string',
+            description: 'File path on disk',
+          },
+          fileSizeBytes: {
+            type: 'integer',
+            description: 'File size in bytes',
+          },
+          mimeType: {
+            type: 'string',
+            description: 'MIME type of the file',
+          },
+          attachmentType: {
+            type: 'string',
+            enum: ['photo', 'receipt', 'manual', 'other'],
+            description: 'Type of attachment',
+          },
+          isPrimary: {
+            type: 'boolean',
+            description: 'Whether this is the primary attachment of its type',
+          },
+          uploadDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Upload timestamp',
+          },
+        },
+        required: [
+          'id',
+          'assetId',
+          'uploadedByUserId',
+          'originalFilename',
+          'storedFilename',
+          'filePath',
+          'fileSizeBytes',
+          'mimeType',
+          'attachmentType',
+          'isPrimary',
+          'uploadDate',
+        ],
+      },
+      TaskComment: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Comment unique identifier',
+          },
+          taskId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Task ID the comment belongs to',
+          },
+          userId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'User ID who made the comment',
+          },
+          content: {
+            type: 'string',
+            description: 'Comment content',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Comment creation timestamp',
+          },
+          updatedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Comment last update timestamp',
+          },
+        },
+        required: ['id', 'taskId', 'userId', 'content', 'createdAt', 'updatedAt'],
+      },
+      TaskAssignment: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Assignment unique identifier',
+          },
+          taskId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Task ID',
+          },
+          userId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Assigned user ID',
+          },
+          assignedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Assignment timestamp',
+          },
+        },
+        required: ['id', 'taskId', 'userId', 'assignedAt'],
+      },
+      TaskAttachment: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Attachment unique identifier',
+          },
+          taskId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Task ID the attachment belongs to',
+          },
+          uploadedByUserId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'User ID who uploaded the attachment',
+          },
+          originalFilename: {
+            type: 'string',
+            description: 'Original filename',
+          },
+          storedFilename: {
+            type: 'string',
+            description: 'Stored filename on disk',
+          },
+          fileSizeBytes: {
+            type: 'integer',
+            description: 'File size in bytes',
+          },
+          mimeType: {
+            type: 'string',
+            description: 'MIME type of the file',
+          },
+          uploadDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Upload timestamp',
+          },
+        },
+        required: [
+          'id',
+          'taskId',
+          'uploadedByUserId',
+          'originalFilename',
+          'storedFilename',
+          'fileSizeBytes',
+          'mimeType',
+          'uploadDate',
+        ],
+      },
+      // Request DTOs
+      LoginRequest: {
+        type: 'object',
+        properties: {
+          email: {
+            type: 'string',
+            format: 'email',
+            description: 'User email address',
+          },
+          password: {
+            type: 'string',
+            format: 'password',
+            description: 'User password',
+          },
+          totp: {
+            type: 'string',
+            description: 'TOTP code if 2FA is enabled',
+          },
+        },
+        required: ['email', 'password'],
+      },
+      RegisterRequest: {
+        type: 'object',
+        properties: {
+          email: {
+            type: 'string',
+            format: 'email',
+            description: 'User email address',
+          },
+          password: {
+            type: 'string',
+            format: 'password',
+            minLength: 8,
+            description: 'User password (minimum 8 characters)',
+          },
+          fullName: {
+            type: 'string',
+            description: 'User full name',
+          },
+          organizationName: {
+            type: 'string',
+            description: 'Organization name',
+          },
+        },
+        required: ['email', 'password', 'organizationName'],
+      },
+      RefreshTokenRequest: {
+        type: 'object',
+        properties: {
+          refreshToken: {
+            type: 'string',
+            description: 'Refresh token',
+          },
+        },
+        required: ['refreshToken'],
+      },
+      CreateAssetRequest: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Asset name',
+          },
+          category: {
+            $ref: '#/components/schemas/AssetCategory',
+          },
+          status: {
+            $ref: '#/components/schemas/AssetStatus',
+          },
+          assetTemplateId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Asset template ID to use',
+          },
+          locationId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Location ID',
+          },
+          parentId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Parent asset ID',
+          },
+          manufacturer: {
+            type: 'string',
+            description: 'Manufacturer name',
+          },
+          modelNumber: {
+            type: 'string',
+            description: 'Model number',
+          },
+          serialNumber: {
+            type: 'string',
+            description: 'Serial number',
+          },
+          purchaseDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Purchase date',
+          },
+          purchasePrice: {
+            type: 'number',
+            description: 'Purchase price',
+          },
+          description: {
+            type: 'string',
+            description: 'Asset description',
+          },
+          link: {
+            type: 'string',
+            format: 'uri',
+            description: 'Link to asset information',
+          },
+          tags: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+            description: 'Asset tags',
+          },
+          warrantyScope: {
+            type: 'string',
+            description: 'Warranty scope',
+          },
+          warrantyExpiry: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Warranty expiry date',
+          },
+          warrantyLifetime: {
+            type: 'boolean',
+            description: 'Lifetime warranty',
+          },
+          customFields: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'Custom fields',
+          },
+        },
+        required: ['name', 'category'],
+      },
+      UpdateAssetRequest: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Asset name',
+          },
+          category: {
+            $ref: '#/components/schemas/AssetCategory',
+          },
+          status: {
+            $ref: '#/components/schemas/AssetStatus',
+          },
+          locationId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Location ID',
+          },
+          manufacturer: {
+            type: 'string',
+            description: 'Manufacturer name',
+          },
+          modelNumber: {
+            type: 'string',
+            description: 'Model number',
+          },
+          serialNumber: {
+            type: 'string',
+            description: 'Serial number',
+          },
+          purchaseDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Purchase date',
+          },
+          purchasePrice: {
+            type: 'number',
+            description: 'Purchase price',
+          },
+          description: {
+            type: 'string',
+            description: 'Asset description',
+          },
+          link: {
+            type: 'string',
+            format: 'uri',
+            description: 'Link to asset information',
+          },
+          tags: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+            description: 'Asset tags',
+          },
+          warrantyScope: {
+            type: 'string',
+            description: 'Warranty scope',
+          },
+          warrantyExpiry: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Warranty expiry date',
+          },
+          warrantyLifetime: {
+            type: 'boolean',
+            description: 'Lifetime warranty',
+          },
+          customFields: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'Custom fields',
+          },
+        },
+      },
+      CreateTaskRequest: {
+        type: 'object',
+        properties: {
+          assetId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Related asset ID',
+          },
+          title: {
+            type: 'string',
+            description: 'Task title',
+          },
+          description: {
+            type: 'string',
+            description: 'Task description',
+          },
+          dueDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Due date',
+          },
+          status: {
+            $ref: '#/components/schemas/TaskStatus',
+          },
+          priority: {
+            $ref: '#/components/schemas/TaskPriority',
+          },
+          estimatedCost: {
+            type: 'number',
+            description: 'Estimated cost',
+          },
+          estimatedMinutes: {
+            type: 'integer',
+            description: 'Estimated duration in minutes',
+          },
+          assignedUserIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+              format: 'uuid',
+            },
+            description: 'User IDs to assign the task to',
+          },
+        },
+        required: ['title', 'dueDate'],
+      },
+      UpdateTaskRequest: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'Task title',
+          },
+          description: {
+            type: 'string',
+            description: 'Task description',
+          },
+          dueDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Due date',
+          },
+          status: {
+            $ref: '#/components/schemas/TaskStatus',
+          },
+          priority: {
+            $ref: '#/components/schemas/TaskPriority',
+          },
+          estimatedCost: {
+            type: 'number',
+            description: 'Estimated cost',
+          },
+          actualCost: {
+            type: 'number',
+            description: 'Actual cost',
+          },
+          estimatedMinutes: {
+            type: 'integer',
+            description: 'Estimated duration in minutes',
+          },
+          actualMinutes: {
+            type: 'integer',
+            description: 'Actual duration in minutes',
+          },
+        },
+      },
+      CreateScheduleRequest: {
+        type: 'object',
+        properties: {
+          assetId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Asset ID to associate with',
+          },
+          name: {
+            type: 'string',
+            description: 'Schedule name',
+          },
+          description: {
+            type: 'string',
+            description: 'Schedule description',
+          },
+          scheduleType: {
+            $ref: '#/components/schemas/ScheduleType',
+          },
+          type: {
+            type: 'string',
+            description: 'Additional schedule type',
+          },
+          startDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Start date',
+          },
+          endDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'End date',
+          },
+          intervalDays: {
+            type: 'integer',
+            description: 'Interval in days',
+          },
+          intervalMonths: {
+            type: 'integer',
+            description: 'Interval in months',
+          },
+          customRrule: {
+            type: 'string',
+            description: 'Custom RRULE',
+          },
+          monthlyDayOfMonth: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 31,
+            description: 'Day of month for monthly schedules',
+          },
+          seasonalMonths: {
+            type: 'array',
+            items: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 12,
+            },
+            description: 'Months for seasonal schedules',
+          },
+          usageThreshold: {
+            type: 'number',
+            description: 'Usage threshold',
+          },
+          taskTemplate: {
+            type: 'object',
+            properties: {
+              title: {
+                type: 'string',
+                description: 'Task title template',
+              },
+              description: {
+                type: 'string',
+                description: 'Task description template',
+              },
+              priority: {
+                $ref: '#/components/schemas/TaskPriority',
+              },
+              estimatedCost: {
+                type: 'number',
+                description: 'Estimated cost',
+              },
+              estimatedMinutes: {
+                type: 'integer',
+                description: 'Estimated duration',
+              },
+            },
+            required: ['title'],
+          },
+          autoCreateAdvance: {
+            type: 'integer',
+            description: 'Days in advance to create tasks',
+          },
+        },
+        required: ['name', 'scheduleType', 'startDate', 'taskTemplate'],
+      },
+      CreateLocationRequest: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Location name',
+          },
+          description: {
+            type: 'string',
+            description: 'Location description',
+          },
+          parentId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Parent location ID',
+          },
+        },
+        required: ['name'],
+      },
+      CreateAssetTemplateRequest: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+            description: 'Template name',
+          },
+          category: {
+            $ref: '#/components/schemas/AssetCategory',
+          },
+          description: {
+            type: 'string',
+            description: 'Template description',
+          },
+          defaultFields: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'Default field values',
+          },
+          customFields: {
+            type: 'object',
+            additionalProperties: true,
+            description: 'Custom field definitions',
+          },
+        },
+        required: ['name', 'category'],
+      },
+      // Response DTOs
+      PaginatedResponse: {
+        type: 'object',
+        properties: {
+          data: {
+            type: 'array',
+            items: {
+              type: 'object',
+            },
+            description: 'Array of items',
+          },
+          pagination: {
+            type: 'object',
+            properties: {
+              page: {
+                type: 'integer',
+                description: 'Current page number',
+              },
+              limit: {
+                type: 'integer',
+                description: 'Items per page',
+              },
+              total: {
+                type: 'integer',
+                description: 'Total number of items',
+              },
+              totalPages: {
+                type: 'integer',
+                description: 'Total number of pages',
+              },
+            },
+            required: ['page', 'limit', 'total', 'totalPages'],
+          },
+        },
+        required: ['data', 'pagination'],
+      },
+      SuccessResponse: {
+        type: 'object',
+        properties: {
+          message: {
+            type: 'string',
+            description: 'Success message',
+          },
+          data: {
+            type: 'object',
+            description: 'Response data',
+          },
+        },
+        required: ['message'],
+      },
+      FileUploadResponse: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'File ID',
+          },
+          filename: {
+            type: 'string',
+            description: 'Original filename',
+          },
+          size: {
+            type: 'integer',
+            description: 'File size in bytes',
+          },
+          mimeType: {
+            type: 'string',
+            description: 'MIME type',
+          },
+          url: {
+            type: 'string',
+            format: 'uri',
+            description: 'File URL',
+          },
+        },
+        required: ['id', 'filename', 'size', 'mimeType', 'url'],
+      },
     },
   },
   tags: [
@@ -498,8 +1664,32 @@ const swaggerDefinition = {
       description: 'Asset management endpoints',
     },
     {
+      name: 'Asset Templates',
+      description: 'Asset template management endpoints',
+    },
+    {
+      name: 'Asset Attachments',
+      description: 'Asset attachment management endpoints',
+    },
+    {
       name: 'Tasks',
       description: 'Task management endpoints',
+    },
+    {
+      name: 'Locations',
+      description: 'Location management endpoints',
+    },
+    {
+      name: 'Schedules',
+      description: 'Schedule management endpoints',
+    },
+    {
+      name: 'Notifications',
+      description: 'Notification management endpoints',
+    },
+    {
+      name: 'OIDC',
+      description: 'OpenID Connect authentication endpoints',
     },
     {
       name: 'Health',

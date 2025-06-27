@@ -27,19 +27,22 @@ export function registerQueueCleanup(): void {
       try {
         // First, wait for any pending jobs to complete
         await waitForQueueJobs(3000);
-        
+
         // Close all queues and their connections
         await closeQueues();
-        
+
         // Disconnect the main Redis client
         await disconnectRedis();
-        
+
         // Give connections time to fully close
         await new Promise((resolve) => setTimeout(resolve, 500));
-        
+
         logger.debug('Queue cleanup completed');
       } catch (error) {
-        logger.error('Error during queue cleanup:', error);
+        logger.error(
+          'Error during queue cleanup:',
+          error instanceof Error ? error : new Error(String(error)),
+        );
       }
     }, 30000); // Increase timeout for cleanup
   }
@@ -51,7 +54,7 @@ export function registerQueueCleanup(): void {
 export async function clearAllQueues(): Promise<void> {
   try {
     const { queues } = await import('../../lib/queue');
-    
+
     await Promise.all([
       queues.email.obliterate({ force: true }),
       queues.notifications.obliterate({ force: true }),
@@ -59,10 +62,13 @@ export async function clearAllQueues(): Promise<void> {
       queues.reports.obliterate({ force: true }),
       queues.schedules.obliterate({ force: true }),
     ]);
-    
+
     logger.debug('All queues cleared');
   } catch (error) {
-    logger.error('Error clearing queues:', error);
+    logger.error(
+      'Error clearing queues:',
+      error instanceof Error ? error : new Error(String(error)),
+    );
   }
 }
 
@@ -72,7 +78,7 @@ export async function clearAllQueues(): Promise<void> {
 export async function waitForQueueJobs(timeout = 5000): Promise<void> {
   const { queues } = await import('../../lib/queue');
   const startTime = Date.now();
-  
+
   while (Date.now() - startTime < timeout) {
     const allQueues = Object.values(queues);
     const jobCounts = await Promise.all(
@@ -82,18 +88,18 @@ export async function waitForQueueJobs(timeout = 5000): Promise<void> {
           queue.getWaitingCount(),
         ]);
         return active + waiting;
-      })
+      }),
     );
-    
+
     const totalJobs = jobCounts.reduce((sum, count) => sum + count, 0);
-    
+
     if (totalJobs === 0) {
       return;
     }
-    
+
     // Wait a bit before checking again
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  
+
   logger.warn('Timeout waiting for queue jobs to complete');
 }

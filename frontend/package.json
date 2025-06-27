@@ -15,19 +15,30 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "generate:component": "ts-node scripts/generate-component.ts"
   },
   "dependencies": {
+    "@ducanh2912/next-pwa": "^10.2.9",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
+    "@hookform/resolvers": "^5.1.1",
     "@mui/icons-material": "^7.1.1",
-    "@mui/material": "^7.1.1",
+    "@mui/lab": "^7.0.0-beta.14",
+    "@mui/material": "^7.1.2",
+    "@mui/x-tree-view": "^8.5.3",
     "@tanstack/react-query": "^5.80.7",
     "@tanstack/react-query-devtools": "^5.80.7",
+    "@tiptap/extension-mention": "^2.23.0",
+    "@tiptap/react": "^2.23.0",
+    "@tiptap/starter-kit": "^2.23.0",
     "axios": "^1.9.0",
+    "date-fns": "^4.1.0",
     "next": "15.3.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-hook-form": "^7.58.1",
+    "zod": "^3.25.67",
     "zustand": "^5.0.5"
   },
   "devDependencies": {

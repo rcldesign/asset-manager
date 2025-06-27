@@ -1,0 +1,69 @@
+<mjml>
+  <mj-head>
+    <mj-title>{{title}}</mj-title>
+    <mj-preview>{{previewText}}</mj-preview>
+    <mj-attributes>
+      <mj-all font-family="Arial, sans-serif" />
+      <mj-text font-size="14px" line-height="1.6" />
+      <mj-section background-color="#f4f4f4" padding="0" />
+      <mj-wrapper background-color="#f4f4f4" padding="20px 0" />
+      <mj-column background-color="#ffffff" />
+    </mj-attributes>
+    <mj-style inline="inline">
+      .primary-button {
+        background-color: #3b82f6 !important;
+        color: #ffffff !important;
+      }
+      .secondary-button {
+        background-color: #6b7280 !important;
+        color: #ffffff !important;
+      }
+      .footer-text {
+        color: #6b7280;
+        font-size: 12px;
+      }
+      .header-logo {
+        max-width: 150px;
+      }
+    </mj-style>
+  </mj-head>
+  <mj-body>
+    <mj-wrapper>
+      <!-- Header -->
+      <mj-section padding="20px 0 0 0">
+        <mj-column>
+          <mj-text align="center" font-size="24px" font-weight="bold" color="#1f2937">
+            DumbAssets
+          </mj-text>
+        </mj-column>
+      </mj-section>
+
+      <!-- Main Content -->
+      <mj-section padding="20px">
+        <mj-column>
+          {{content}}
+        </mj-column>
+      </mj-section>
+
+      <!-- Footer -->
+      <mj-section padding="20px">
+        <mj-column>
+          <mj-divider border-color="#e5e7eb" border-width="1px" />
+          <mj-text align="center" css-class="footer-text" padding-top="20px">
+            © {{currentYear}} DumbAssets. All rights reserved.
+          </mj-text>
+          <mj-text align="center" css-class="footer-text">
+            {{organizationName}}
+          </mj-text>
+          {{#if unsubscribeUrl}}
+          <mj-text align="center" css-class="footer-text">
+            <a href="{{unsubscribeUrl}}" style="color: #6b7280; text-decoration: underline;">
+              Unsubscribe from these emails
+            </a>
+          </mj-text>
+          {{/if}}
+        </mj-column>
+      </mj-section>
+    </mj-wrapper>
+  </mj-body>
+</mjml>

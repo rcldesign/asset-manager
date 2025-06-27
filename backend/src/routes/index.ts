@@ -8,3 +8,6 @@ export { default as assetRoutes } from './assets';
 export { default as taskRoutes } from './tasks';
 export { default as scheduleRoutes } from './schedules';
 export { default as notificationRoutes } from './notifications';
+export { default as activityStreamRoutes } from './activity-streams';
+export { default as googleAuthRoutes } from './google-auth';
+export { default as emailWebhookRoutes } from './email-webhooks';

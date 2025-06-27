@@ -57,7 +57,22 @@ export class TestDatabaseHelper {
 
   async clearDatabase(): Promise<void> {
     // Clear in reverse dependency order
+    // Phase 2 tables
+    await this.prisma.notification.deleteMany();
+    await this.prisma.assetAttachment.deleteMany();
+    await this.prisma.taskAttachment.deleteMany();
+    await this.prisma.taskComment.deleteMany();
+    await this.prisma.taskAssignment.deleteMany();
+    await this.prisma.task.deleteMany();
+    await this.prisma.schedule.deleteMany();
+    await this.prisma.component.deleteMany();
+    await this.prisma.asset.deleteMany();
+    await this.prisma.assetTemplate.deleteMany();
+    await this.prisma.location.deleteMany();
+
+    // Phase 1 tables
     await this.prisma.apiToken.deleteMany();
+    await this.prisma.session.deleteMany();
     await this.prisma.user.deleteMany();
     await this.prisma.organization.deleteMany();
   }
@@ -190,6 +205,38 @@ export class TestAPIHelper {
   constructor(app: Application) {
     this.app = app;
     this.request = request(app);
+  }
+
+  /**
+   * Convenience methods for making HTTP requests
+   */
+  get(url: string) {
+    return request(this.app).get(url);
+  }
+
+  post(url: string) {
+    return request(this.app).post(url);
+  }
+
+  put(url: string) {
+    return request(this.app).put(url);
+  }
+
+  patch(url: string) {
+    return request(this.app).patch(url);
+  }
+
+  delete(url: string) {
+    return request(this.app).delete(url);
+  }
+
+  /**
+   * Authenticate a user and return access token
+   */
+  async authenticateUser(email: string, password: string = 'password123'): Promise<string> {
+    const response = await this.post('/api/auth/login').send({ email, password }).expect(200);
+
+    return response.body.tokens.accessToken;
   }
 
   /**
@@ -378,4 +425,20 @@ export function generateCurrentTestTOTPToken(): string {
  */
 export function generateExpiredTestTOTPToken(time: number = MOCK_TIME_EPOCH_SECONDS): string {
   return generateExpiredTOTPToken(TEST_TOTP_SECRET, time);
+}
+
+/**
+ * Generate a simple auth token for integration tests
+ */
+export async function generateAuthToken(user: {
+  id: string;
+  organizationId: string;
+  role: string;
+}): Promise<string> {
+  const tokens = generateTokens({
+    userId: user.id,
+    organizationId: user.organizationId,
+    role: user.role,
+  });
+  return tokens.accessToken;
 }

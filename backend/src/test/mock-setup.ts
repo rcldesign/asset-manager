@@ -5,10 +5,9 @@
  */
 
 // Only mock in unit tests, not integration tests
-const isIntegrationTest = process.env.JEST_WORKER_ID && (
-  __filename.includes('/integration/') || 
-  __filename.includes('/e2e/')
-);
+const isIntegrationTest =
+  process.env.JEST_WORKER_ID &&
+  (__filename.includes('/integration/') || __filename.includes('/e2e/'));
 
 if (!isIntegrationTest) {
   // Mock queue module to prevent Redis connections

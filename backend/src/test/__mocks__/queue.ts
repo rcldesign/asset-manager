@@ -90,8 +90,8 @@ export const resetQueueMocks = () => {
   addMaintenanceJob.mockClear();
   addReportJob.mockClear();
   addScheduleJob.mockClear();
-  
-  Object.values(queues).forEach(queue => {
+
+  Object.values(queues).forEach((queue) => {
     queue.add.mockClear();
     queue.close.mockClear();
     queue.pause.mockClear();
@@ -105,7 +105,7 @@ export const resetQueueMocks = () => {
     queue.getActiveCount.mockClear();
     queue.obliterate.mockClear();
   });
-  
+
   getQueueHealth.mockClear();
   pauseAllQueues.mockClear();
   resumeAllQueues.mockClear();

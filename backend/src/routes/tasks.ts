@@ -2,6 +2,7 @@ import { Router, type Response, type NextFunction } from 'express';
 import type { z } from 'zod';
 import { TaskService } from '../services/task.service';
 import { NotificationService } from '../services/notification.service';
+import { CalendarSyncService } from '../services/calendar-sync.service';
 import { NotFoundError } from '../utils/errors';
 import { authenticateJWT, requirePermission, type AuthenticatedRequest } from '../middleware/auth';
 import { validateRequest } from '../middleware/validation';
@@ -42,8 +43,8 @@ const taskParamsSchema = zod.object({
 });
 
 const taskQuerySchema = zod.object({
-  page: zod.string().transform(Number).optional(),
-  limit: zod.string().transform(Number).optional(),
+  page: zod.union([zod.string(), zod.number()]).transform(Number).optional(),
+  limit: zod.union([zod.string(), zod.number()]).transform(Number).optional(),
   assetId: zod.string().uuid().optional(),
   scheduleId: zod.string().uuid().optional(),
   assignedToUserId: zod.string().uuid().optional(),
@@ -84,8 +85,8 @@ const taskCommentParamsSchema = zod.object({
 });
 
 const taskCommentQuerySchema = zod.object({
-  page: zod.string().transform(Number).optional(),
-  limit: zod.string().transform(Number).optional(),
+  page: zod.union([zod.string(), zod.number()]).transform(Number).optional(),
+  limit: zod.union([zod.string(), zod.number()]).transform(Number).optional(),
 });
 
 const bulkTaskUpdateSchema = zod.object({
@@ -107,6 +108,7 @@ type BulkTaskUpdateBody = z.infer<typeof bulkTaskUpdateSchema>;
 const router = Router();
 const taskService = new TaskService();
 const notificationService = new NotificationService(prisma);
+const calendarSyncService = new CalendarSyncService();
 
 // All task routes require authentication
 router.use(authenticateJWT);
@@ -220,8 +222,9 @@ router.get(
       const { user } = authenticatedReq;
       const query = authenticatedReq.query as TaskQueryBody;
 
-      const page = query.page || 1;
-      const limit = Math.min(query.limit || 20, 100);
+      // page and limit are already transformed to numbers by Zod validation
+      const page = query.page ?? 1;
+      const limit = Math.min(query.limit ?? 20, 100);
 
       const filters = {
         assetId: query.assetId,
@@ -246,7 +249,7 @@ router.get(
       res.json({
         tasks: result.data,
         total: result.meta.total,
-        page: result.meta.page,
+        page: Number(result.meta.page),
         totalPages: result.meta.lastPage,
       });
     } catch (error) {
@@ -284,19 +287,28 @@ router.post(
       const { user } = authenticatedReq;
       const body = authenticatedReq.body as TaskCreateBody;
 
-      const task = await taskService.createTask({
-        organizationId: user.organizationId,
-        title: body.title,
-        description: body.description,
-        dueDate: new Date(body.dueDate),
-        status: body.status,
-        priority: body.priority,
-        estimatedCost: body.estimatedCost,
-        estimatedMinutes: body.estimatedMinutes,
-        assetId: body.assetId,
-        scheduleId: body.scheduleId,
-        assignUserIds: body.assignUserIds,
+      // Fetch user details for activity tracking
+      const userDetails = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, fullName: true, email: true },
       });
+
+      const task = await taskService.createTask(
+        {
+          organizationId: user.organizationId,
+          title: body.title,
+          description: body.description,
+          dueDate: new Date(body.dueDate),
+          status: body.status,
+          priority: body.priority,
+          estimatedCost: body.estimatedCost,
+          estimatedMinutes: body.estimatedMinutes,
+          assetId: body.assetId,
+          scheduleId: body.scheduleId,
+          assignUserIds: body.assignUserIds,
+        },
+        { id: user.id, name: userDetails?.fullName || userDetails?.email || user.email }, // For activity tracking
+      );
 
       // Send notification for task creation
       await notificationService.createNotification({
@@ -309,6 +321,23 @@ router.post(
         message: `Task "${task.title}" has been created`,
         sendInApp: true,
       });
+
+      // Sync task to Google Calendar if enabled
+      if (body.assignUserIds && body.assignUserIds.length > 0) {
+        // Sync for each assigned user
+        for (const assignedUserId of body.assignUserIds) {
+          calendarSyncService.syncTaskToCalendar(task.id, assignedUserId).catch((error) => {
+            logger.error(
+              'Failed to sync task to calendar',
+              error instanceof Error ? error : new Error('Unknown error'),
+              {
+                taskId: task.id,
+                userId: assignedUserId,
+              },
+            );
+          });
+        }
+      }
 
       res.status(201).json(task);
     } catch (error) {
@@ -465,8 +494,8 @@ router.get(
         limit?: number;
       };
 
-      const page = query.page || 1;
-      const limit = Math.min(query.limit || 20, 100);
+      const page = query.page ?? 1;
+      const limit = Math.min(query.limit ?? 20, 100);
 
       const result = await taskService.getUserTasks(userId!, user.organizationId, {
         status: query.status ? (query.status.split(',') as TaskStatus[]) : undefined,
@@ -554,8 +583,8 @@ router.get(
         limit?: number;
       };
 
-      const page = query.page || 1;
-      const limit = Math.min(query.limit || 20, 100);
+      const page = query.page ?? 1;
+      const limit = Math.min(query.limit ?? 20, 100);
 
       const result = await taskService.getAssetTasks(assetId!, user.organizationId, {
         status: query.status ? (query.status.split(',') as TaskStatus[]) : undefined,
@@ -732,10 +761,41 @@ router.put(
       const { taskId } = authenticatedReq.params as TaskParamsBody;
       const body = authenticatedReq.body as TaskUpdateBody;
 
-      const task = await taskService.updateTask(taskId, user.organizationId, {
-        ...body,
-        dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+      // Fetch user details for activity tracking
+      const userDetails = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { id: true, fullName: true, email: true },
       });
+
+      const task = await taskService.updateTask(
+        taskId,
+        user.organizationId,
+        {
+          ...body,
+          dueDate: body.dueDate ? new Date(body.dueDate) : undefined,
+        },
+        { id: user.id, name: userDetails?.fullName || userDetails?.email || user.email }, // For activity tracking
+      );
+
+      // Sync updated task to calendars of all assigned users
+      const taskWithAssignments = await taskService.getTaskById(taskId, user.organizationId, {
+        includeAssignments: true,
+      });
+
+      if (taskWithAssignments && taskWithAssignments.assignments) {
+        for (const assignment of taskWithAssignments.assignments) {
+          calendarSyncService.syncTaskToCalendar(task.id, assignment.userId).catch((error) => {
+            logger.error(
+              'Failed to sync updated task to calendar',
+              error instanceof Error ? error : new Error('Unknown error'),
+              {
+                taskId: task.id,
+                userId: assignment.userId,
+              },
+            );
+          });
+        }
+      }
 
       res.json(task);
     } catch (error) {
@@ -775,6 +835,27 @@ router.delete(
     try {
       const { user } = authenticatedReq;
       const { taskId } = authenticatedReq.params as TaskParamsBody;
+
+      // Get task assignments before deletion for calendar sync cleanup
+      const task = await taskService.getTaskById(taskId, user.organizationId, {
+        includeAssignments: true,
+      });
+
+      if (task && task.assignments) {
+        // Remove from calendars of all assigned users
+        for (const assignment of task.assignments) {
+          calendarSyncService.removeTaskFromCalendar(taskId, assignment.userId).catch((error) => {
+            logger.error(
+              'Failed to remove task from calendar',
+              error instanceof Error ? error : new Error('Unknown error'),
+              {
+                taskId,
+                userId: assignment.userId,
+              },
+            );
+          });
+        }
+      }
 
       await taskService.deleteTask(taskId, user.organizationId);
       res.status(204).send();
@@ -909,8 +990,9 @@ router.get(
       const { taskId } = authenticatedReq.params as TaskCommentParamsBody;
       const query = authenticatedReq.query as TaskCommentQueryBody;
 
-      const page = query.page || 1;
-      const limit = Math.min(query.limit || 20, 100);
+      // page and limit are already transformed to numbers by Zod validation
+      const page = query.page ?? 1;
+      const limit = Math.min(query.limit ?? 20, 100);
 
       const result = await taskService.getTaskComments(taskId, user.organizationId, {
         page,
@@ -920,7 +1002,7 @@ router.get(
       res.json({
         comments: result.data,
         total: result.meta.total,
-        page: result.meta.page,
+        page: Number(result.meta.page),
         totalPages: result.meta.lastPage,
       });
     } catch (error) {
@@ -973,7 +1055,7 @@ router.post(
       const { taskId } = authenticatedReq.params as TaskCommentParamsBody;
       const { content } = authenticatedReq.body as TaskCommentCreateBody;
 
-      const comment = await taskService.addTaskComment({
+      const comment = await taskService.createTaskComment({
         taskId,
         userId: user.id,
         content,
@@ -985,6 +1067,5 @@ router.post(
     }
   },
 );
-
 
 export default router;

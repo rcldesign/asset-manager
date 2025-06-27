@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 import {
   AppError,
   ValidationError,
@@ -15,15 +16,6 @@ interface PrismaError extends Error {
   };
 }
 
-// Interface for Zod validation errors
-interface ZodError extends Error {
-  issues: Array<{
-    path: (string | number)[];
-    message: string;
-    code: string;
-  }>;
-}
-
 // Type guard for Prisma errors
 function isPrismaError(error: unknown): error is PrismaError {
   return error instanceof Error && error.name === 'PrismaClientKnownRequestError';
@@ -31,7 +23,7 @@ function isPrismaError(error: unknown): error is PrismaError {
 
 // Type guard for Zod errors
 function isZodError(error: unknown): error is ZodError {
-  return error instanceof Error && error.name === 'ZodError' && 'issues' in error;
+  return error instanceof ZodError;
 }
 
 // Add a simple utility to redact sensitive keys
@@ -58,14 +50,15 @@ function sanitizeBody(body: unknown): unknown {
 
 // Create a helper function for Zod errors
 function handleZodError(res: Response, error: ZodError): void {
-  const fieldErrors = error.issues.map((issue) => {
-    const fieldName = issue.path.join('.') || 'field';
-    return `${fieldName}: ${issue.message}`;
+  const flattened = error.flatten();
+  const fieldErrors = Object.entries(flattened.fieldErrors).map(([field, messages]) => {
+    return `${field}: ${messages?.join(', ') || 'Invalid value'}`;
   });
 
   res.status(400).json({
-    error: `Validation failed: ${fieldErrors.join(', ')}`,
-    details: error.issues,
+    message: 'Validation failed',
+    error: fieldErrors.length > 0 ? fieldErrors.join(', ') : 'Validation failed',
+    errors: flattened.fieldErrors,
   });
 }
 
@@ -95,6 +88,7 @@ export function errorHandler(error: Error, req: Request, res: Response, _next: N
         });
 
         res.status(400).json({
+          message: 'Validation failed',
           error: `Validation failed: ${fieldErrors.join(', ')}`,
           details: details.issues,
         });
@@ -102,7 +96,11 @@ export function errorHandler(error: Error, req: Request, res: Response, _next: N
       }
     }
     // Fallback for non-Zod validation errors
-    res.status(400).json({ error: error.message, details: error.details });
+    res.status(400).json({
+      message: error.message,
+      error: error.message,
+      details: error.details,
+    });
     return;
   }
 

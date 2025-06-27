@@ -2,13 +2,23 @@ import type { Job } from 'bullmq';
 import { Worker } from 'bullmq';
 import { createRedisConnection } from '../lib/redis';
 import { logger } from '../utils/logger';
-import type { EmailJob, NotificationJob, MaintenanceTaskJob, ReportJob } from '../lib/queue';
+import type {
+  EmailJob,
+  NotificationJob,
+  MaintenanceTaskJob,
+  ReportJob,
+  ScheduleJob,
+} from '../lib/queue';
 
 // Import worker processors
 import { processEmailJob } from './email.worker';
 import { processNotificationJob } from './notification.worker';
 import { processMaintenanceJob } from './maintenance.worker';
 import { processReportJob } from './report.worker';
+import { processScheduleJob } from './schedule.worker';
+import { activityWorker } from './activity.worker';
+import { pushNotificationWorker } from './push-notification.worker';
+import { webhookWorker } from './webhook.worker';
 
 // Worker instances
 const emailWorker = new Worker(
@@ -63,12 +73,29 @@ const reportWorker = new Worker(
   },
 );
 
+const scheduleWorker = new Worker(
+  'schedules',
+  async (job: Job<ScheduleJob>) => {
+    return processScheduleJob(job);
+  },
+  {
+    connection: createRedisConnection(),
+    concurrency: 5, // Process up to 5 schedule jobs concurrently
+    removeOnComplete: { count: 10 },
+    removeOnFail: { count: 25 },
+  },
+);
+
 // Worker event handlers
 const workers = [
   { name: 'email', worker: emailWorker },
   { name: 'notifications', worker: notificationWorker },
   { name: 'maintenance-tasks', worker: maintenanceWorker },
   { name: 'reports', worker: reportWorker },
+  { name: 'schedules', worker: scheduleWorker },
+  { name: 'activities', worker: activityWorker },
+  { name: 'push-notifications', worker: pushNotificationWorker },
+  { name: 'webhooks', worker: webhookWorker },
 ];
 
 workers.forEach(({ name, worker }) => {
@@ -127,4 +154,13 @@ export async function closeAllWorkers(): Promise<void> {
 }
 
 // Export individual workers
-export { emailWorker, notificationWorker, maintenanceWorker, reportWorker };
+export {
+  emailWorker,
+  notificationWorker,
+  maintenanceWorker,
+  reportWorker,
+  scheduleWorker,
+  activityWorker,
+  pushNotificationWorker,
+  webhookWorker,
+};

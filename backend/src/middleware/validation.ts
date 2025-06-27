@@ -21,8 +21,8 @@ export function validateRequest(schema: {
       if (schema.query) {
         // Parse and validate query
         const parsedQuery = schema.query.parse(req.query);
-        // Clear existing query and add parsed values
-        Object.keys(req.query).forEach(key => {
+        // Clear existing query and add parsed values using Object.assign
+        Object.keys(req.query).forEach((key) => {
           delete (req.query as any)[key];
         });
         Object.assign(req.query, parsedQuery);
@@ -31,7 +31,10 @@ export function validateRequest(schema: {
       if (schema.params) {
         // Parse and validate params
         const parsedParams = schema.params.parse(req.params);
-        // Update params with parsed values
+        // Clear existing params and add parsed values using Object.assign
+        Object.keys(req.params).forEach((key) => {
+          delete (req.params as any)[key];
+        });
         Object.assign(req.params, parsedParams);
       }
 

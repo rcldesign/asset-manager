@@ -1,97 +1,29 @@
 import type { Job } from 'bullmq';
 import { logger } from '../utils/logger';
 import { config } from '../config';
+import { emailTransporter } from '../config/email';
 import type { EmailJob } from '../lib/queue';
+import type { SentMessageInfo } from 'nodemailer';
 
-// Mock SMTP implementation - replace with actual email service
-class EmailService {
-  sendEmail(emailData: EmailJob): { messageId: string; accepted: string[]; rejected: string[] } {
-    // In development/test, log the email instead of sending
-    if (config.env !== 'production' || !config.smtp) {
-      logger.info('Email (mock):', {
-        to: emailData.to,
-        subject: emailData.subject,
-        html: emailData.html?.substring(0, 100) + '...',
-        text: emailData.text?.substring(0, 100) + '...',
-      });
-
-      return {
-        messageId: `mock-${Date.now()}`,
-        accepted: Array.isArray(emailData.to) ? emailData.to : [emailData.to],
-        rejected: [],
-      };
-    }
-
-    // TODO: Implement actual SMTP sending using nodemailer or similar
-    // For now, just mock it
-    logger.warn('Email sending not yet implemented for production');
-    return {
-      messageId: `pending-${Date.now()}`,
-      accepted: Array.isArray(emailData.to) ? emailData.to : [emailData.to],
-      rejected: [],
-    };
-  }
-
-  renderTemplate(template: string, data: Record<string, unknown>): { html: string; text: string } {
-    // Simple template rendering - replace with proper template engine
-    const templates: Record<string, { html: string; text: string }> = {
-      welcome: {
-        html: `
-          <h2>Welcome to DumbAssets Enhanced!</h2>
-          <p>Hello {{name}},</p>
-          <p>Your account has been created successfully. You can now start managing your assets.</p>
-          <p>Best regards,<br>DumbAssets Enhanced Team</p>
-        `,
-        text: `Welcome to DumbAssets Enhanced!\n\nHello {{name}},\n\nYour account has been created successfully. You can now start managing your assets.\n\nBest regards,\nDumbAssets Enhanced Team`,
-      },
-      'password-reset': {
-        html: `
-          <h2>Password Reset Request</h2>
-          <p>Hello {{name}},</p>
-          <p>We received a request to reset your password. Click the link below to reset it:</p>
-          <p><a href="{{resetLink}}">Reset Password</a></p>
-          <p>If you didn't request this, please ignore this email.</p>
-          <p>Best regards,<br>DumbAssets Enhanced Team</p>
-        `,
-        text: `Password Reset Request\n\nHello {{name}},\n\nWe received a request to reset your password. Visit this link to reset it:\n{{resetLink}}\n\nIf you didn't request this, please ignore this email.\n\nBest regards,\nDumbAssets Enhanced Team`,
-      },
-      'warranty-expiring': {
-        html: `
-          <h2>Warranty Expiring Soon</h2>
-          <p>Hello {{name}},</p>
-          <p>The warranty for your asset "{{assetName}}" is expiring on {{expiryDate}}.</p>
-          <p>Please review and take necessary action if needed.</p>
-          <p>Best regards,<br>DumbAssets Enhanced Team</p>
-        `,
-        text: `Warranty Expiring Soon\n\nHello {{name}},\n\nThe warranty for your asset "{{assetName}}" is expiring on {{expiryDate}}.\n\nPlease review and take necessary action if needed.\n\nBest regards,\nDumbAssets Enhanced Team`,
-      },
-    };
-
-    const template_content = templates[template];
-    if (!template_content) {
-      throw new Error(`Template '${template}' not found`);
-    }
-
-    // Simple string replacement - replace with proper template engine like Handlebars
-    let html = template_content.html;
-    let text = template_content.text;
-
-    Object.entries(data).forEach(([key, value]) => {
-      const placeholder = `{{${key}}}`;
-      html = html.replace(new RegExp(placeholder, 'g'), String(value));
-      text = text.replace(new RegExp(placeholder, 'g'), String(value));
-    });
-
-    return { html, text };
-  }
+export interface EmailJobData extends EmailJob {
+  from?: string;
+  replyTo?: string;
+  attachments?: Array<{
+    filename: string;
+    content?: string | Buffer;
+    path?: string;
+    contentType?: string;
+  }>;
 }
 
-const emailService = new EmailService();
-
+/**
+ * Process an email job from the queue
+ */
 export async function processEmailJob(
-  job: Job<EmailJob>,
-): Promise<{ messageId: string; status: string }> {
+  job: Job<EmailJobData>,
+): Promise<{ messageId: string; status: string; accepted?: string[]; rejected?: string[] }> {
   const { data } = job;
+  const startTime = Date.now();
 
   try {
     await job.updateProgress(10);
@@ -103,40 +35,202 @@ export async function processEmailJob(
 
     await job.updateProgress(20);
 
-    // Render template if provided
-    if (data.template && data.templateData) {
-      const rendered = emailService.renderTemplate(data.template, data.templateData);
-      data.html = data.html || rendered.html;
-      data.text = data.text || rendered.text;
+    // Check if email service is configured
+    if (!emailTransporter) {
+      // In development/test, log the email instead of sending
+      if (config.env !== 'production') {
+        logger.info('Email (mock - no transporter):', {
+          to: data.to,
+          subject: data.subject,
+          html: data.html?.substring(0, 100) + '...',
+          text: data.text?.substring(0, 100) + '...',
+        });
+
+        return {
+          messageId: `mock-${Date.now()}`,
+          status: 'sent-mock',
+          accepted: Array.isArray(data.to) ? data.to : [data.to],
+          rejected: [],
+        };
+      }
+
+      throw new Error('Email service not configured');
     }
 
     await job.updateProgress(50);
 
-    // Send email
-    const result = emailService.sendEmail(data);
+    // Send email using nodemailer
+    const info: SentMessageInfo = await emailTransporter.sendMail({
+      from: data.from,
+      to: Array.isArray(data.to) ? data.to.join(', ') : data.to,
+      subject: data.subject,
+      html: data.html,
+      text: data.text || stripHtml(data.html || ''),
+      replyTo: data.replyTo,
+      attachments: data.attachments,
+      // Add message headers for better deliverability
+      headers: {
+        'X-Priority': getPriorityHeader(job.opts.priority || 5),
+        'X-Mailer': 'DumbAssets/1.0',
+      },
+    });
 
     await job.updateProgress(100);
 
-    logger.info(`Email sent successfully`, {
+    const duration = Date.now() - startTime;
+
+    logger.info('Email sent successfully', {
       jobId: job.id,
-      messageId: result.messageId,
+      messageId: info.messageId,
       to: data.to,
       subject: data.subject,
-      accepted: result.accepted.length,
-      rejected: result.rejected.length,
+      accepted: info.accepted?.length || 0,
+      rejected: info.rejected?.length || 0,
+      duration,
+    });
+
+    // Store email event for tracking
+    await storeEmailEvent({
+      messageId: info.messageId,
+      to: data.to,
+      subject: data.subject,
+      status: 'sent',
+      sentAt: new Date(),
     });
 
     return {
-      messageId: result.messageId,
+      messageId: info.messageId,
       status: 'sent',
+      accepted: info.accepted,
+      rejected: info.rejected,
     };
   } catch (err: unknown) {
     const error = err instanceof Error ? err : new Error(String(err));
+    const duration = Date.now() - startTime;
+
     logger.error('Failed to process email job', error, {
       jobId: job.id,
       to: data.to,
       subject: data.subject,
+      duration,
+      attemptNumber: job.attemptsMade + 1,
     });
-    throw error;
+
+    // Store failed email event
+    await storeEmailEvent({
+      messageId: `failed-${job.id}`,
+      to: data.to,
+      subject: data.subject,
+      status: 'failed',
+      error: error.message,
+      failedAt: new Date(),
+    });
+
+    // Determine if we should retry
+    if (shouldRetryEmail(error)) {
+      throw error; // BullMQ will retry based on job options
+    } else {
+      // Don't retry for permanent failures
+      return {
+        messageId: `failed-${job.id}`,
+        status: 'failed-permanent',
+      };
+    }
   }
+}
+
+/**
+ * Helper function to strip HTML tags
+ */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+/**
+ * Get priority header value
+ */
+function getPriorityHeader(priority: number): string {
+  if (priority <= 2) return '1 (Highest)';
+  if (priority <= 4) return '2 (High)';
+  if (priority <= 6) return '3 (Normal)';
+  if (priority <= 8) return '4 (Low)';
+  return '5 (Lowest)';
+}
+
+/**
+ * Store email event for tracking and analytics
+ */
+async function storeEmailEvent(event: {
+  messageId: string;
+  to: string | string[];
+  subject: string;
+  status: 'sent' | 'failed';
+  error?: string;
+  sentAt?: Date;
+  failedAt?: Date;
+}): Promise<void> {
+  try {
+    // TODO: Store in database for tracking
+    // For now, just log it
+    logger.debug('Email event', event);
+  } catch (error) {
+    logger.error(
+      'Failed to store email event',
+      error instanceof Error ? error : new Error('Unknown error'),
+    );
+  }
+}
+
+/**
+ * Determine if an email error is retryable
+ */
+function shouldRetryEmail(error: Error): boolean {
+  const message = error.message.toLowerCase();
+
+  // Don't retry for permanent failures
+  const permanentErrors = [
+    'invalid recipient',
+    'mailbox not found',
+    'user unknown',
+    'domain not found',
+    'blacklisted',
+    'rejected',
+    'invalid email',
+  ];
+
+  for (const permanentError of permanentErrors) {
+    if (message.includes(permanentError)) {
+      return false;
+    }
+  }
+
+  // Retry for temporary failures
+  const temporaryErrors = [
+    'connection timeout',
+    'connection refused',
+    'temporarily unavailable',
+    'too many connections',
+    'rate limit',
+    'try again later',
+  ];
+
+  for (const tempError of temporaryErrors) {
+    if (message.includes(tempError)) {
+      return true;
+    }
+  }
+
+  // Default to retry for unknown errors
+  return true;
 }

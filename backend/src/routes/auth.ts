@@ -126,6 +126,7 @@ router.post(
           emailVerified: user.emailVerified,
           totpEnabled: user.totpEnabled,
           isActive: user.isActive,
+          notificationPreferences: user.notificationPreferences,
         },
         organization: {
           id: organization.id,
@@ -249,6 +250,7 @@ router.post(
           emailVerified: authResult.user.emailVerified,
           totpEnabled: authResult.user.totpEnabled,
           isActive: authResult.user.isActive,
+          notificationPreferences: authResult.user.notificationPreferences,
         },
         tokens,
       });
@@ -315,6 +317,7 @@ router.get('/me', authenticateRequest, async (req: Request, res: Response, next:
       emailVerified: user.emailVerified,
       totpEnabled: user.totpEnabled,
       isActive: user.isActive,
+      notificationPreferences: user.notificationPreferences,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     });

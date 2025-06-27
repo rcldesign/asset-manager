@@ -1,6 +1,7 @@
 import { Queue, QueueEvents, type Job } from 'bullmq';
 import { createRedisConnection } from './redis';
 import { logger } from '../utils/logger';
+import type { ActivityEventPayload } from '../types/activity';
 
 // Create shared Redis connection for queues
 const queueConnection = createRedisConnection();
@@ -58,6 +59,58 @@ export const reportQueue = new Queue('reports', {
   },
 });
 
+export const scheduleQueue = new Queue('schedules', {
+  connection: queueConnection,
+  defaultJobOptions: {
+    removeOnComplete: 10,
+    removeOnFail: 25,
+    attempts: 1, // Schedule jobs should not retry - if they fail, log and continue
+    backoff: {
+      type: 'exponential',
+      delay: 1000,
+    },
+  },
+});
+
+export const activityQueue = new Queue('activities', {
+  connection: queueConnection,
+  defaultJobOptions: {
+    removeOnComplete: 20,
+    removeOnFail: 50,
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 1000,
+    },
+  },
+});
+
+export const pushNotificationQueue = new Queue('push-notifications', {
+  connection: queueConnection,
+  defaultJobOptions: {
+    removeOnComplete: 10,
+    removeOnFail: 50,
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 2000,
+    },
+  },
+});
+
+export const webhookQueue = new Queue('webhooks', {
+  connection: queueConnection,
+  defaultJobOptions: {
+    removeOnComplete: 10,
+    removeOnFail: 100,
+    attempts: 3,
+    backoff: {
+      type: 'exponential',
+      delay: 1000,
+    },
+  },
+});
+
 // Queue Events for monitoring
 export const emailQueueEvents = new QueueEvents('email', {
   connection: createRedisConnection(),
@@ -69,6 +122,20 @@ export const maintenanceQueueEvents = new QueueEvents('maintenance-tasks', {
   connection: createRedisConnection(),
 });
 export const reportQueueEvents = new QueueEvents('reports', {
+  connection: createRedisConnection(),
+});
+export const scheduleQueueEvents = new QueueEvents('schedules', {
+  connection: createRedisConnection(),
+});
+export const activityQueueEvents = new QueueEvents('activities', {
+  connection: createRedisConnection(),
+});
+
+const pushNotificationQueueEvents = new QueueEvents('push-notifications', {
+  connection: createRedisConnection(),
+});
+
+export const webhookQueueEvents = new QueueEvents('webhooks', {
   connection: createRedisConnection(),
 });
 
@@ -83,7 +150,16 @@ export interface EmailJob {
 }
 
 export interface NotificationJob {
-  type: 'asset-warranty-expiring' | 'task-due' | 'task-overdue' | 'welcome-user' | 'password-reset';
+  type:
+    | 'asset-warranty-expiring'
+    | 'task-due'
+    | 'task-overdue'
+    | 'welcome-user'
+    | 'password-reset'
+    | 'invitation'
+    | 'task-assigned'
+    | 'mention'
+    | 'schedule-changed';
   userId?: string;
   assetId?: string;
   taskId?: string;
@@ -109,6 +185,46 @@ export interface ReportJob {
   organizationId: string;
   reportParams: Record<string, unknown>;
   format: 'pdf' | 'csv' | 'xlsx';
+}
+
+export interface ScheduleJob {
+  type: 'process-schedule' | 'generate-tasks';
+  scheduleId: string;
+  organizationId: string;
+  assetId?: string;
+  occurrenceDate: string; // ISO string
+  data?: Record<string, unknown>;
+}
+
+export type ActivityJob = ActivityEventPayload;
+
+export interface PushNotificationJob {
+  userId: string;
+  payload: {
+    title: string;
+    body: string;
+    icon?: string;
+    badge?: string;
+    data?: Record<string, any>;
+    actions?: Array<{
+      action: string;
+      title: string;
+      icon?: string;
+    }>;
+  };
+}
+
+export interface WebhookJob {
+  webhookId: string;
+  event: {
+    id: string;
+    type: string;
+    organizationId: string;
+    timestamp: Date;
+    data: Record<string, any>;
+    userId?: string;
+    metadata?: Record<string, any>;
+  };
 }
 
 // Queue helper functions
@@ -148,16 +264,69 @@ export async function addReportJob(data: ReportJob, options?: { delay?: number }
   });
 }
 
+export async function addScheduleJob(
+  data: ScheduleJob,
+  options?: { delay?: number; priority?: number },
+): Promise<Job> {
+  return scheduleQueue.add('process-schedule', data, {
+    delay: options?.delay,
+    priority: options?.priority,
+  });
+}
+
+export async function addActivityJob(
+  data: ActivityJob,
+  options?: { delay?: number; priority?: number },
+): Promise<Job> {
+  return activityQueue.add('process-activity', data, {
+    delay: options?.delay,
+    priority: options?.priority,
+  });
+}
+
+export async function addPushNotificationJob(
+  data: PushNotificationJob,
+  options?: { delay?: number; priority?: number },
+): Promise<Job> {
+  return pushNotificationQueue.add('send-push-notification', data, {
+    delay: options?.delay,
+    priority: options?.priority,
+  });
+}
+
+export async function addWebhookJob(
+  data: WebhookJob,
+  options?: { delay?: number; priority?: number },
+): Promise<Job> {
+  return webhookQueue.add('deliver-webhook', data, {
+    delay: options?.delay,
+    priority: options?.priority,
+  });
+}
+
 // Queue event handlers for logging
 const allQueueEvents = [
   emailQueueEvents,
   notificationQueueEvents,
   maintenanceQueueEvents,
   reportQueueEvents,
+  scheduleQueueEvents,
+  activityQueueEvents,
+  pushNotificationQueueEvents,
+  webhookQueueEvents,
 ];
 
 allQueueEvents.forEach((queueEvents, index) => {
-  const queueNames = ['email', 'notifications', 'maintenance-tasks', 'reports'];
+  const queueNames = [
+    'email',
+    'notifications',
+    'maintenance-tasks',
+    'reports',
+    'schedules',
+    'activities',
+    'push-notifications',
+    'webhooks',
+  ];
   const queueName = queueNames[index];
 
   queueEvents.on('completed', ({ jobId }: { jobId: string }) => {
@@ -198,6 +367,10 @@ export async function getQueueHealth(): Promise<{
     { name: 'notifications', queue: notificationQueue },
     { name: 'maintenance-tasks', queue: maintenanceQueue },
     { name: 'reports', queue: reportQueue },
+    { name: 'schedules', queue: scheduleQueue },
+    { name: 'activities', queue: activityQueue },
+    { name: 'push-notifications', queue: pushNotificationQueue },
+    { name: 'webhooks', queue: webhookQueue },
   ];
 
   const queueStats = await Promise.all(
@@ -231,6 +404,10 @@ export async function pauseAllQueues(): Promise<void> {
     notificationQueue.pause(),
     maintenanceQueue.pause(),
     reportQueue.pause(),
+    scheduleQueue.pause(),
+    activityQueue.pause(),
+    pushNotificationQueue.pause(),
+    webhookQueue.pause(),
   ]);
   logger.info('All queues paused');
 }
@@ -241,6 +418,10 @@ export async function resumeAllQueues(): Promise<void> {
     notificationQueue.resume(),
     maintenanceQueue.resume(),
     reportQueue.resume(),
+    scheduleQueue.resume(),
+    activityQueue.resume(),
+    pushNotificationQueue.resume(),
+    webhookQueue.resume(),
   ]);
   logger.info('All queues resumed');
 }
@@ -254,10 +435,18 @@ export async function closeQueues(): Promise<void> {
     notificationQueue.close(),
     maintenanceQueue.close(),
     reportQueue.close(),
+    scheduleQueue.close(),
+    activityQueue.close(),
+    pushNotificationQueue.close(),
+    webhookQueue.close(),
     emailQueueEvents.close(),
     notificationQueueEvents.close(),
     maintenanceQueueEvents.close(),
     reportQueueEvents.close(),
+    scheduleQueueEvents.close(),
+    activityQueueEvents.close(),
+    pushNotificationQueueEvents.close(),
+    webhookQueueEvents.close(),
   ]);
 
   await queueConnection.quit();
@@ -270,4 +459,8 @@ export const queues = {
   notifications: notificationQueue,
   maintenance: maintenanceQueue,
   reports: reportQueue,
+  schedules: scheduleQueue,
+  activities: activityQueue,
+  pushNotifications: pushNotificationQueue,
+  webhooks: webhookQueue,
 };

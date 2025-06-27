@@ -1,4 +1,4 @@
-import type { Location, Prisma } from '@prisma/client';
+import type { Location } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError, NotFoundError, ConflictError } from '../utils/errors';
 
@@ -150,7 +150,11 @@ export class LocationService {
    *   parentId: 'new-parent-456'
    * });
    */
-  async updateLocation(id: string, data: UpdateLocationData, organizationId: string): Promise<Location> {
+  async updateLocation(
+    id: string,
+    data: UpdateLocationData,
+    organizationId: string,
+  ): Promise<Location> {
     return prisma.$transaction(async (tx) => {
       const location = await tx.location.findFirst({ where: { id, organizationId } });
       if (!location) {
@@ -172,7 +176,9 @@ export class LocationService {
           },
         });
         if (existingLocation) {
-          throw new ConflictError(`A location named "${name}" already exists in the target location`);
+          throw new ConflictError(
+            `A location named "${name}" already exists in the target location`,
+          );
         }
       }
 
@@ -223,7 +229,11 @@ export class LocationService {
    * // Move to root level
    * await locationService.moveLocation('floor-123', null, 'org-789');
    */
-  async moveLocation(locationId: string, newParentId: string | null, organizationId: string): Promise<Location> {
+  async moveLocation(
+    locationId: string,
+    newParentId: string | null,
+    organizationId: string,
+  ): Promise<Location> {
     return prisma.$transaction(async (tx) => {
       return this.moveLocationWithinTransaction(locationId, newParentId, organizationId, tx);
     });
@@ -276,7 +286,9 @@ export class LocationService {
     });
 
     if (existingWithSameName) {
-      throw new ConflictError(`A location named "${locationToMove.name}" already exists in the target location`);
+      throw new ConflictError(
+        `A location named "${locationToMove.name}" already exists in the target location`,
+      );
     }
 
     // CRITICAL: Prevent circular dependency

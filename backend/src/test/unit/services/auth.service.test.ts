@@ -40,6 +40,7 @@ describe('AuthService', () => {
     totpEnabled: false,
     totpSecret: null,
     emailVerified: true,
+    notificationPreferences: {},
     createdAt: new Date(),
     updatedAt: new Date(),
   };

@@ -441,7 +441,7 @@ describe('Tasks API Integration Tests', () => {
       const existingUser = await dbHelper.getPrisma().user.findUnique({
         where: { email: 'another@test.com' },
       });
-      
+
       if (existingUser) {
         anotherUser = existingUser;
       } else {

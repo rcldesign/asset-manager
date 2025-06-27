@@ -60,16 +60,28 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
-  // Restore console methods
-  jest.restoreAllMocks();
+  try {
+    // Restore console methods
+    jest.restoreAllMocks();
 
-  // Stop all known timers
-  _test_only_stopCleanupInterval();
-  _test_only_stopOidcCleanupInterval();
+    // Stop all known timers
+    _test_only_stopCleanupInterval();
+    _test_only_stopOidcCleanupInterval();
 
-  // Disconnect the global Redis client
-  await disconnectRedis();
-});
+    // Disconnect the global Redis client
+    await disconnectRedis();
+
+    // Disconnect Prisma
+    if (global.prisma) {
+      await global.prisma.$disconnect();
+    }
+
+    // Give all connections time to close
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  } catch (error) {
+    console.error('Error in global afterAll cleanup:', error);
+  }
+}, 30000);
 
 // Global error handler for unhandled promises in tests
 process.on('unhandledRejection', (reason, promise) => {

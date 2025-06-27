@@ -1,12 +1,7 @@
-'use client';
-
+import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from "next/font/google";
-import { QueryClientProvider } from '@tanstack/react-query';
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CssBaseline } from '@mui/material';
 import "./globals.css";
-import { queryClient } from '../lib/query-client';
+import LayoutWrapper from './layout-wrapper';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,11 +13,38 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const theme = createTheme({
-  typography: {
-    fontFamily: 'var(--font-geist-sans), Arial, sans-serif',
+export const metadata: Metadata = {
+  title: 'DumbAssets - Asset Management System',
+  description: 'Comprehensive asset management and maintenance tracking system',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'DumbAssets',
   },
-});
+  formatDetection: {
+    telephone: false,
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    title: 'DumbAssets - Asset Management System',
+    description: 'Comprehensive asset management and maintenance tracking system',
+    siteName: 'DumbAssets',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'DumbAssets - Asset Management System',
+    description: 'Comprehensive asset management and maintenance tracking system',
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: '#3B82F6',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+};
 
 export default function RootLayout({
   children,
@@ -31,16 +53,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="apple-touch-icon" href="/icon-192x192.png" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <QueryClientProvider client={queryClient}>
-          <ThemeProvider theme={theme}>
-            <CssBaseline />
-            {children}
-            <ReactQueryDevtools initialIsOpen={false} />
-          </ThemeProvider>
-        </QueryClientProvider>
+        <LayoutWrapper>
+          {children}
+        </LayoutWrapper>
       </body>
     </html>
   );

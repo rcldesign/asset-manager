@@ -1,0 +1,82 @@
+<mjml>
+  <mj-include path="./base.mjml" />
+  <mj-body>
+    <mj-raw>
+      {{#> base title="Task Notification" previewText="{{notificationTitle}}"}}
+        {{#*inline "content"}}
+          <mj-text font-size="20px" font-weight="bold" padding-bottom="20px">
+            {{notificationTitle}}
+          </mj-text>
+          
+          <mj-text padding-bottom="20px">
+            Hi {{userName}},
+          </mj-text>
+          
+          <mj-text padding-bottom="20px">
+            {{notificationMessage}}
+          </mj-text>
+          
+          {{#if taskDetails}}
+          <mj-section background-color="#f9fafb" border-radius="8px" padding="15px">
+            <mj-column>
+              <mj-text font-weight="bold" padding-bottom="10px">
+                Task Details:
+              </mj-text>
+              
+              <mj-text padding-bottom="5px">
+                <strong>Title:</strong> {{taskDetails.title}}
+              </mj-text>
+              
+              {{#if taskDetails.description}}
+              <mj-text padding-bottom="5px">
+                <strong>Description:</strong> {{taskDetails.description}}
+              </mj-text>
+              {{/if}}
+              
+              <mj-text padding-bottom="5px">
+                <strong>Due Date:</strong> {{taskDetails.dueDate}}
+              </mj-text>
+              
+              <mj-text padding-bottom="5px">
+                <strong>Priority:</strong> {{taskDetails.priority}}
+              </mj-text>
+              
+              {{#if taskDetails.assignedTo}}
+              <mj-text padding-bottom="5px">
+                <strong>Assigned To:</strong> {{taskDetails.assignedTo}}
+              </mj-text>
+              {{/if}}
+              
+              {{#if taskDetails.asset}}
+              <mj-text>
+                <strong>Asset:</strong> {{taskDetails.asset}}
+              </mj-text>
+              {{/if}}
+            </mj-column>
+          </mj-section>
+          {{/if}}
+          
+          <mj-button href="{{taskUrl}}" css-class="primary-button" padding="20px 0">
+            View Task
+          </mj-button>
+          
+          {{#if additionalActions}}
+          <mj-text padding-top="20px" padding-bottom="10px">
+            Quick Actions:
+          </mj-text>
+          
+          {{#each additionalActions}}
+          <mj-button href="{{this.url}}" css-class="secondary-button" padding="5px 0">
+            {{this.label}}
+          </mj-button>
+          {{/each}}
+          {{/if}}
+          
+          <mj-text color="#6b7280" padding-top="20px">
+            You received this notification because you are {{reason}}.
+          </mj-text>
+        {{/inline}}
+      {{/base}}
+    </mj-raw>
+  </mj-body>
+</mjml>

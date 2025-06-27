@@ -57,6 +57,26 @@ export class AuthorizationError extends AppError {
 }
 
 /**
+ * Unauthorized error class
+ */
+export class UnauthorizedError extends AppError {
+  constructor(message: string = 'Unauthorized') {
+    super(message, 401, 'UNAUTHORIZED');
+    this.name = 'UnauthorizedError';
+  }
+}
+
+/**
+ * Forbidden error class (alias for AuthorizationError)
+ */
+export class ForbiddenError extends AuthorizationError {
+  constructor(message: string = 'Forbidden') {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
+/**
  * Not found error class
  */
 export class NotFoundError extends AppError {

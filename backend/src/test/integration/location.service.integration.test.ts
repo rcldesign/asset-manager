@@ -198,38 +198,44 @@ describe('LocationService Integration Tests', () => {
 
     it('should move location and update paths correctly', async () => {
       // Move floor1 from building1 to building2
-      const movedFloor = await locationService.moveLocation(floor1.id, building2.id);
+      const movedFloor = await locationService.moveLocation(
+        floor1.id,
+        building2.id,
+        testOrganization.id,
+      );
 
       expect(movedFloor.parentId).toBe(building2.id);
       expect(movedFloor.path).toBe(`${building2.id}.${floor1.id}`);
 
       // Check that child's path was also updated
-      const updatedRoom = await locationService.getLocationById(room101.id);
+      const updatedRoom = await locationService.getLocationById(room101.id, testOrganization.id);
       expect(updatedRoom?.path).toBe(`${building2.id}.${floor1.id}.${room101.id}`);
     });
 
     it('should move location to root', async () => {
       // Move floor1 to become a root location
-      const movedFloor = await locationService.moveLocation(floor1.id, null);
+      const movedFloor = await locationService.moveLocation(floor1.id, null, testOrganization.id);
 
       expect(movedFloor.parentId).toBeNull();
       expect(movedFloor.path).toBe(floor1.id);
 
       // Check that child's path was also updated
-      const updatedRoom = await locationService.getLocationById(room101.id);
+      const updatedRoom = await locationService.getLocationById(room101.id, testOrganization.id);
       expect(updatedRoom?.path).toBe(`${floor1.id}.${room101.id}`);
     });
 
     it('should prevent circular dependency - direct', async () => {
       // Try to move building1 to be a child of floor1 (its own child)
-      await expect(locationService.moveLocation(building1.id, floor1.id)).rejects.toThrow(AppError);
+      await expect(
+        locationService.moveLocation(building1.id, floor1.id, testOrganization.id),
+      ).rejects.toThrow(AppError);
     });
 
     it('should prevent circular dependency - indirect', async () => {
       // Try to move building1 to be a child of room101 (its own grandchild)
-      await expect(locationService.moveLocation(building1.id, room101.id)).rejects.toThrow(
-        AppError,
-      );
+      await expect(
+        locationService.moveLocation(building1.id, room101.id, testOrganization.id),
+      ).rejects.toThrow(AppError);
     });
 
     it('should prevent cross-organization moves', async () => {
@@ -238,9 +244,9 @@ describe('LocationService Integration Tests', () => {
         organizationId: testOrganization2.id,
       });
 
-      await expect(locationService.moveLocation(floor1.id, otherOrgLocation.id)).rejects.toThrow(
-        AppError,
-      );
+      await expect(
+        locationService.moveLocation(floor1.id, otherOrgLocation.id, testOrganization.id),
+      ).rejects.toThrow(AppError);
     });
   });
 
@@ -258,9 +264,9 @@ describe('LocationService Integration Tests', () => {
       });
 
       // Should be able to delete the leaf location
-      await locationService.deleteLocation(floor.id);
+      await locationService.deleteLocation(floor.id, testOrganization.id);
 
-      const deletedLocation = await locationService.getLocationById(floor.id);
+      const deletedLocation = await locationService.getLocationById(floor.id, testOrganization.id);
       expect(deletedLocation).toBeNull();
     });
 
@@ -277,7 +283,9 @@ describe('LocationService Integration Tests', () => {
       });
 
       // Try to delete building (which has a child)
-      await expect(locationService.deleteLocation(building.id)).rejects.toThrow(ConflictError);
+      await expect(
+        locationService.deleteLocation(building.id, testOrganization.id),
+      ).rejects.toThrow(ConflictError);
     });
   });
 
@@ -337,11 +345,11 @@ describe('LocationService Integration Tests', () => {
       expect(tree).toHaveLength(1); // One root building
       expect(tree[0]!.name).toBe('Main Building');
       expect(tree[0]!.children).toHaveLength(2); // Two floors
-      
+
       // Find Floor 1 and Floor 2 by name to avoid relying on order
-      const floor1Node = tree[0]!.children!.find(child => child.name === 'Floor 1');
-      const floor2Node = tree[0]!.children!.find(child => child.name === 'Floor 2');
-      
+      const floor1Node = tree[0]!.children!.find((child) => child.name === 'Floor 1');
+      const floor2Node = tree[0]!.children!.find((child) => child.name === 'Floor 2');
+
       expect(floor1Node).toBeDefined();
       expect(floor2Node).toBeDefined();
       expect(floor1Node!.children).toHaveLength(2); // Two rooms on floor 1
@@ -349,14 +357,14 @@ describe('LocationService Integration Tests', () => {
     });
 
     it('should find subtree correctly', async () => {
-      const subtree = await locationService.findSubtree(floor1.id);
+      const subtree = await locationService.findSubtree(floor1.id, testOrganization.id);
 
       expect(subtree).toHaveLength(2); // Two rooms
       expect(subtree.map((l) => l.name).sort()).toEqual(['Room 101', 'Room 102']);
     });
 
     it('should find ancestors correctly', async () => {
-      const ancestors = await locationService.findAncestors(room101.id);
+      const ancestors = await locationService.findAncestors(room101.id, testOrganization.id);
 
       expect(ancestors).toHaveLength(2); // Building and Floor
       expect(ancestors[0]!.name).toBe('Main Building');
@@ -364,7 +372,7 @@ describe('LocationService Integration Tests', () => {
     });
 
     it('should return empty ancestors for root location', async () => {
-      const ancestors = await locationService.findAncestors(building.id);
+      const ancestors = await locationService.findAncestors(building.id, testOrganization.id);
       expect(ancestors).toHaveLength(0);
     });
 

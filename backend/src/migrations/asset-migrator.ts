@@ -96,6 +96,8 @@ export class AssetMigrator {
       const assetData: Prisma.AssetCreateInput = {
         id: assetId,
         name,
+        category: 'OTHER' as const, // Default category for legacy assets
+        path: `/${assetId}`, // Simple path for migrated assets
         manufacturer: legacyAsset.manufacturer || null,
         modelNumber: legacyAsset.model || null,
         serialNumber: legacyAsset.serial || null,

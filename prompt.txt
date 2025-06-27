@@ -1,0 +1,46 @@
+Perfect timing! Here are the search results on Prisma recursive CTEs:
+
+**Key Findings:**
+
+1. **Prisma Limitation:** Prisma doesn't natively support recursive CTEs yet (ongoing GitHub issue #3725)
+
+2. **Available Workarounds:**
+   - **Limited Depth Queries:** Manually build nested includes with max depth
+   - **Raw SQL Queries:** Use `$queryRaw` with proper WITH RECURSIVE CTEs
+   - **Database Views:** Create PostgreSQL views with recursive logic
+
+3. **Raw SQL Structure for Tasks:**
+```sql
+WITH RECURSIVE task_tree AS (
+  -- Base case: select the starting task
+  SELECT id, "parentTaskId", title, status, "subtaskOrder", 0 as depth
+  FROM tasks
+  WHERE id = $1
+  
+  UNION ALL
+  
+  -- Recursive case: select children
+  SELECT t.id, t."parentTaskId", t.title, t.status, t."subtaskOrder", tt.depth + 1
+  FROM tasks t
+  INNER JOIN task_tree tt ON t."parentTaskId" = tt.id
+)
+SELECT * FROM task_tree ORDER BY depth, "subtaskOrder";
+```
+
+4. **Schema Setup:** Current schema already has proper self-referencing setup with `onDelete: Cascade`
+
+**Strategic Decision:**
+Given the time constraints and need for rapid implementation, I recommend:
+
+**Option A (Fast):** Limited depth approach (max 3-4 levels) for MVP, with recursive raw SQL as enhancement later
+**Option B (Complete):** Implement raw SQL recursive queries immediately using `$queryRaw`
+
+For maximum velocity while ensuring robustness, I lean toward **Option A** for now - implement the transactional completion logic first (most critical), use limited depth includes for retrieval (sufficient for most real-world use cases), and note recursive raw SQL as technical debt.
+
+Should I proceed with implementing the enhanced TaskService with:
+1. Transactional parent-child completion logic (your excellent guidance)
+2. Limited depth subtask retrieval (3-4 levels) 
+3. Proper `subtaskOrder` management
+4. Multi-user assignment logic
+
+Then move to @mentions and activity streams? This maintains momentum while covering the core functionality.

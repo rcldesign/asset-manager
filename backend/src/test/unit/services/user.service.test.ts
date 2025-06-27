@@ -16,6 +16,24 @@ interface MockedBcrypt {
 }
 const mockBcrypt = bcrypt as unknown as MockedBcrypt;
 
+// Helper function to create a mock user with all required fields
+const createMockUser = (overrides: Partial<any> = {}) => ({
+  id: 'user-123',
+  email: 'test@example.com',
+  passwordHash: 'hashed-password',
+  fullName: 'Test User',
+  role: UserRole.MEMBER,
+  organizationId: 'org-123',
+  emailVerified: true,
+  isActive: true,
+  totpEnabled: false,
+  totpSecret: null,
+  notificationPreferences: {},
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
+
 // Simplified test to check if Prisma mock works without other mocks
 describe('Prisma Mock Test', () => {
   test('prismaMock should be defined and mockable', async () => {
@@ -51,18 +69,14 @@ describe('UserService', () => {
       mockBcrypt.hash.mockResolvedValue(hashedPassword as never);
 
       const createdUser = {
-        id: 'user-123',
-        email: userData.email,
-        passwordHash: hashedPassword,
-        fullName: userData.fullName,
-        role: userData.role,
-        organizationId: userData.organizationId,
-        emailVerified: false,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        ...createMockUser({
+          email: userData.email,
+          passwordHash: hashedPassword,
+          fullName: userData.fullName,
+          role: userData.role,
+          organizationId: userData.organizationId,
+          emailVerified: false,
+        }),
         organization: {
           id: userData.organizationId,
           name: 'Test Organization',
@@ -111,20 +125,16 @@ describe('UserService', () => {
         organizationId: 'org-123',
       };
 
-      prismaMock.user.findUnique.mockResolvedValue({
-        id: 'existing-user',
-        email: userData.email,
-        passwordHash: 'hashed',
-        fullName: userData.fullName,
-        role: UserRole.MEMBER,
-        organizationId: userData.organizationId,
-        emailVerified: false,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      prismaMock.user.findUnique.mockResolvedValue(
+        createMockUser({
+          id: 'existing-user',
+          email: userData.email,
+          passwordHash: 'hashed',
+          fullName: userData.fullName,
+          organizationId: userData.organizationId,
+          emailVerified: false,
+        }),
+      );
 
       await expect(userService.createUser(userData)).rejects.toThrow(
         'User with this email already exists',
@@ -149,18 +159,7 @@ describe('UserService', () => {
     test('should return user if found', async () => {
       const userId = 'user-123';
       const user = {
-        id: userId,
-        email: 'test@example.com',
-        passwordHash: 'hashed',
-        fullName: 'Test User',
-        role: UserRole.MEMBER,
-        organizationId: 'org-123',
-        emailVerified: true,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        ...createMockUser({ id: userId }),
         organization: {
           id: 'org-123',
           name: 'Test Organization',
@@ -198,18 +197,10 @@ describe('UserService', () => {
       const email = 'test@example.com';
       const password = 'password123';
       const user = {
-        id: 'user-123',
-        email,
-        passwordHash: 'hashed-password',
-        fullName: 'Test User',
-        role: UserRole.MEMBER,
-        organizationId: 'org-123',
-        emailVerified: true,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        ...createMockUser({
+          email,
+          passwordHash: 'hashed-password',
+        }),
         organization: {
           id: 'org-123',
           name: 'Test Organization',
@@ -232,18 +223,10 @@ describe('UserService', () => {
       const email = 'test@example.com';
       const password = 'wrong-password';
       const user = {
-        id: 'user-123',
-        email,
-        passwordHash: 'hashed-password',
-        fullName: 'Test User',
-        role: UserRole.MEMBER,
-        organizationId: 'org-123',
-        emailVerified: true,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        ...createMockUser({
+          email,
+          passwordHash: 'hashed-password',
+        }),
         organization: {
           id: 'org-123',
           name: 'Test Organization',
@@ -276,18 +259,11 @@ describe('UserService', () => {
       const email = 'test@example.com';
       const password = 'password123';
       const user = {
-        id: 'user-123',
-        email,
-        passwordHash: 'hashed-password',
-        fullName: 'Test User',
-        role: UserRole.MEMBER,
-        organizationId: 'org-123',
-        emailVerified: true,
-        isActive: false, // User is inactive
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        ...createMockUser({
+          email,
+          passwordHash: 'hashed-password',
+          isActive: false, // User is inactive
+        }),
         organization: {
           id: 'org-123',
           name: 'Test Organization',
@@ -310,20 +286,11 @@ describe('UserService', () => {
       const userId = 'user-123';
       const currentPassword = 'oldpassword';
       const newPassword = 'newpassword';
-      const user = {
+      const user = createMockUser({
         id: userId,
         email: 'test@example.com',
         passwordHash: 'old-hashed-password',
-        fullName: 'Test User',
-        role: UserRole.MEMBER,
-        organizationId: 'org-123',
-        emailVerified: true,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      });
 
       prismaMock.user.findUnique.mockResolvedValue(user);
       mockBcrypt.compare.mockResolvedValue(true as never);
@@ -345,20 +312,11 @@ describe('UserService', () => {
       const userId = 'user-123';
       const currentPassword = 'wrongpassword';
       const newPassword = 'newpassword';
-      const user = {
+      const user = createMockUser({
         id: userId,
         email: 'test@example.com',
         passwordHash: 'old-hashed-password',
-        fullName: 'Test User',
-        role: UserRole.MEMBER,
-        organizationId: 'org-123',
-        emailVerified: true,
-        isActive: true,
-        totpEnabled: false,
-        totpSecret: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      });
 
       prismaMock.user.findUnique.mockResolvedValue(user);
       mockBcrypt.compare.mockResolvedValue(false as never);
@@ -373,34 +331,18 @@ describe('UserService', () => {
     test('should return paginated users', async () => {
       const organizationId = 'org-123';
       const users = [
-        {
+        createMockUser({
           id: 'user-1',
           email: 'user1@example.com',
-          passwordHash: 'hashed',
           fullName: 'User 1',
-          role: UserRole.MEMBER,
           organizationId,
-          emailVerified: true,
-          isActive: true,
-          totpEnabled: false,
-          totpSecret: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
+        }),
+        createMockUser({
           id: 'user-2',
           email: 'user2@example.com',
-          passwordHash: 'hashed',
           fullName: 'User 2',
-          role: UserRole.MEMBER,
           organizationId,
-          emailVerified: true,
-          isActive: true,
-          totpEnabled: false,
-          totpSecret: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        }),
       ];
 
       prismaMock.user.findMany.mockResolvedValue(users);
@@ -465,18 +407,11 @@ describe('UserService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
         user: {
-          id: 'user-123',
-          email: 'test@example.com',
-          passwordHash: 'hashed',
-          fullName: 'Test User',
-          role: UserRole.MEMBER,
-          organizationId: 'org-123',
-          emailVerified: true,
-          isActive: true,
-          totpEnabled: false,
-          totpSecret: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          ...createMockUser({
+            id: 'user-123',
+            email: 'test@example.com',
+            organizationId: 'org-123',
+          }),
           organization: {
             id: 'org-123',
             name: 'Test Organization',

@@ -412,7 +412,11 @@ router.post(
       const { locationId } = authenticatedReq.params as LocationParamsBody;
       const { newParentId } = authenticatedReq.body as LocationMoveBody;
 
-      const location = await locationService.moveLocation(locationId, newParentId || null, user.organizationId);
+      const location = await locationService.moveLocation(
+        locationId,
+        newParentId || null,
+        user.organizationId,
+      );
 
       logger.info('Location moved', {
         locationId,
@@ -522,4 +526,3 @@ router.get(
 );
 
 export default router;
-

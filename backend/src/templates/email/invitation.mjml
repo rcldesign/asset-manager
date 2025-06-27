@@ -1,0 +1,59 @@
+<mjml>
+  <mj-include path="./base.mjml" />
+  <mj-body>
+    <mj-raw>
+      {{#> base title="You're Invited to DumbAssets" previewText="{{inviterName}} has invited you to join {{organizationName}}"}}
+        {{#*inline "content"}}
+          <mj-text font-size="20px" font-weight="bold" padding-bottom="20px">
+            You're Invited!
+          </mj-text>
+          
+          <mj-text padding-bottom="20px">
+            Hi{{#if recipientName}} {{recipientName}}{{/if}},
+          </mj-text>
+          
+          <mj-text padding-bottom="20px">
+            {{inviterName}} has invited you to join <strong>{{organizationName}}</strong> on DumbAssets, our asset management platform.
+          </mj-text>
+          
+          <mj-text padding-bottom="10px">
+            With DumbAssets, you'll be able to:
+          </mj-text>
+          
+          <mj-text padding-left="20px" padding-bottom="5px">
+            • Track and manage assets across your organization
+          </mj-text>
+          <mj-text padding-left="20px" padding-bottom="5px">
+            • Schedule and assign maintenance tasks
+          </mj-text>
+          <mj-text padding-left="20px" padding-bottom="5px">
+            • Collaborate with your team in real-time
+          </mj-text>
+          <mj-text padding-left="20px" padding-bottom="20px">
+            • Generate reports and insights
+          </mj-text>
+          
+          <mj-button href="{{acceptUrl}}" css-class="primary-button" padding="20px 0">
+            Accept Invitation
+          </mj-button>
+          
+          <mj-text padding-top="20px" color="#6b7280" font-size="12px">
+            Or copy and paste this link into your browser:
+          </mj-text>
+          
+          <mj-text color="#6b7280" font-size="12px" padding-bottom="20px">
+            {{acceptUrl}}
+          </mj-text>
+          
+          <mj-text padding-bottom="20px">
+            This invitation will expire in {{expiryDays}} days.
+          </mj-text>
+          
+          <mj-text color="#6b7280">
+            If you have any questions, please contact {{inviterName}} or your organization administrator.
+          </mj-text>
+        {{/inline}}
+      {{/base}}
+    </mj-raw>
+  </mj-body>
+</mjml>

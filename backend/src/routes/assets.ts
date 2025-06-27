@@ -1,9 +1,10 @@
-import { Router, type Response, type NextFunction } from 'express';
+import { Router, type Response, type NextFunction, type Request } from 'express';
 import type { z } from 'zod';
+import { MulterError } from 'multer';
 import { AssetService } from '../services/asset.service';
 import { FileStorageService } from '../services/file-storage.service';
 import { NotificationService } from '../services/notification.service';
-import { ValidationError, NotFoundError } from '../utils/errors';
+import { NotFoundError } from '../utils/errors';
 import { authenticateJWT, requirePermission, type AuthenticatedRequest } from '../middleware/auth';
 import { validateRequest } from '../middleware/validation';
 import { logger } from '../utils/logger';
@@ -53,8 +54,8 @@ const assetParamsSchema = zod.object({
 });
 
 const assetQuerySchema = zod.object({
-  page: zod.string().transform(Number).optional(),
-  limit: zod.string().transform(Number).optional(),
+  page: zod.union([zod.string(), zod.number()]).transform(Number).optional(),
+  limit: zod.union([zod.string(), zod.number()]).transform(Number).optional(),
   search: zod.string().optional(),
   category: zod
     .enum(['HARDWARE', 'SOFTWARE', 'FURNITURE', 'VEHICLE', 'EQUIPMENT', 'PROPERTY', 'OTHER'])
@@ -571,7 +572,11 @@ router.post(
       const { attachmentType = 'general', isPrimary = false } = authenticatedReq.body;
 
       if (!file) {
-        throw new ValidationError('No file provided');
+        res.status(400).json({
+          message: 'No file provided',
+          error: 'No file provided',
+        });
+        return;
       }
 
       // Verify asset exists and belongs to organization
@@ -897,5 +902,18 @@ router.post(
   },
 );
 
+// Handle Multer errors specifically
+router.use((err: any, _req: Request, res: Response, next: NextFunction): void => {
+  if (err instanceof MulterError) {
+    // Multer errors typically indicate a client-side issue with the file upload
+    res.status(400).json({
+      message: 'File upload error: ' + err.message,
+      code: err.code,
+    });
+    return;
+  }
+  // Pass other errors to the next error handler
+  next(err);
+});
 
 export default router;

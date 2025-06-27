@@ -44,7 +44,7 @@ export const resetRedisMocks = () => {
   mockRedisClient.flushdb.mockClear();
   mockRedisClient.on.mockClear();
   mockRedisClient.off.mockClear();
-  
+
   getRedis.mockClear();
   createRedisConnection.mockClear();
   connectRedis.mockClear();

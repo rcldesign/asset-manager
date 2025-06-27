@@ -31,6 +31,88 @@ enum TaskPriority {
   LOW
 }
 
+enum ScheduleType {
+  ONE_OFF
+  FIXED_INTERVAL
+  CUSTOM
+}
+
+enum AssetCategory {
+  HARDWARE
+  SOFTWARE
+  FURNITURE
+  VEHICLE
+  EQUIPMENT
+  PROPERTY
+  OTHER
+}
+
+enum AssetStatus {
+  OPERATIONAL
+  MAINTENANCE
+  REPAIR
+  RETIRED
+  DISPOSED
+  LOST
+}
+
+// Phase 3: Advanced Capabilities Enums
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+  WEBHOOK
+  APPRISE
+}
+
+enum NotificationType {
+  task_assigned    @map("task-assigned")
+  task_due         @map("task-due")
+  task_overdue     @map("task-overdue")
+  asset_warranty_expiring @map("asset-warranty-expiring")
+  asset_maintenance_due   @map("asset-maintenance-due")
+  schedule_changed @map("schedule-changed")
+  mention
+  invitation
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+enum ActivityAction {
+  CREATE
+  UPDATE
+  DELETE
+  ASSIGN
+  COMPLETE
+  COMMENT
+  MENTION
+  ATTACH
+}
+
+enum ActivityEntityType {
+  ASSET
+  TASK
+  SCHEDULE
+  USER
+  COMMENT
+}
+
+enum WebhookEventType {
+  task_created    @map("task.created")
+  task_updated    @map("task.updated")
+  task_completed  @map("task.completed")
+  task_assigned   @map("task.assigned")
+  asset_created   @map("asset.created")
+  asset_updated   @map("asset.updated")
+  asset_deleted   @map("asset.deleted")
+  schedule_triggered @map("schedule.triggered")
+}
+
 // Core entities for Phase 1
 
 model Organization {
@@ -40,35 +122,53 @@ model Organization {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  owner  User?   @relation("OrganizationOwner", fields: [ownerUserId], references: [id])
-  users  User[]  @relation("OrganizationMembers")
-  assets Asset[]
-  tasks  Task[]
+  owner           User?             @relation("OrganizationOwner", fields: [ownerUserId], references: [id])
+  users           User[]            @relation("OrganizationMembers")
+  assets          Asset[]
+  tasks           Task[]
+  locations       Location[]
+  assetTemplates  AssetTemplate[]
+  schedules       Schedule[]
+  notifications   Notification[]
+  userInvitations UserInvitation[]
+  activityStreams ActivityStream[]
+  activities      Activity[]
+  webhookSubscriptions WebhookSubscription[]
 
   @@map("organizations")
 }
 
 model User {
-  id             String   @id @default(uuid())
-  email          String   @unique
-  passwordHash   String? // Optional for OIDC-only users
-  role           UserRole @default(MEMBER)
-  fullName       String?
-  organizationId String
-  totpSecret     String? // For 2FA
-  totpEnabled    Boolean  @default(false)
-  emailVerified  Boolean  @default(false)
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                      String   @id @default(uuid())
+  email                   String   @unique
+  passwordHash            String? // Optional for OIDC-only users
+  role                    UserRole @default(MEMBER)
+  fullName                String?
+  organizationId          String
+  totpSecret              String? // For 2FA
+  totpEnabled             Boolean  @default(false)
+  emailVerified           Boolean  @default(false)
+  isActive                Boolean  @default(true)
+  notificationPreferences Json     @default("{}")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
-  organization      Organization     @relation("OrganizationMembers", fields: [organizationId], references: [id], onDelete: Cascade)
-  ownedOrganization Organization?    @relation("OrganizationOwner")
-  taskAssignments   TaskAssignment[]
-  taskComments      TaskComment[]
-  sessions          Session[]
-  apiTokens         ApiToken[]
-  TaskAttachment    TaskAttachment[]
+  organization        Organization      @relation("OrganizationMembers", fields: [organizationId], references: [id], onDelete: Cascade)
+  ownedOrganization   Organization?     @relation("OrganizationOwner")
+  taskAssignments     TaskAssignment[]
+  taskComments        TaskComment[]
+  sessions            Session[]
+  apiTokens           ApiToken[]
+  taskAttachments     TaskAttachment[]
+  assetAttachments    AssetAttachment[]
+  notifications       Notification[]
+  invitationsSent     UserInvitation[]  @relation("InvitedBy")
+  activityStreams     ActivityStream[]
+  notificationPrefs   UserNotificationPreference[]
+  calendarIntegrations CalendarIntegration[]
+  mentions            Mention[]
+  googleCredentials   GoogleCredentials?
+  pushSubscriptions   PushSubscription[]
 
   @@map("users")
 }
@@ -106,35 +206,99 @@ model ApiToken {
   @@map("api_tokens")
 }
 
-// Asset management (core fields for migration)
+// Phase 2: Core functionality models
+
+model Location {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  parentId       String?
+  path           String   // Materialized path for efficient querying
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Location?    @relation("LocationHierarchy", fields: [parentId], references: [id])
+  children     Location[]   @relation("LocationHierarchy")
+  assets       Asset[]
+
+  @@unique([organizationId, name, parentId])
+  @@index([organizationId])
+  @@index([parentId])
+  @@index([path])
+  @@map("locations")
+}
+
+model AssetTemplate {
+  id             String        @id @default(uuid())
+  organizationId String
+  name           String
+  category       AssetCategory
+  description    String?
+  defaultFields  Json          @default("{}")
+  customFields   Json          @default("{}")
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assets       Asset[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([category])
+  @@map("asset_templates")
+}
+
 model Asset {
-  id                      String    @id @default(uuid())
+  id                      String        @id @default(uuid())
   organizationId          String
   name                    String
+  category                AssetCategory
+  status                  AssetStatus   @default(OPERATIONAL)
+  assetTemplateId         String?
+  locationId              String?
+  parentId                String? // For asset hierarchy
+  path                    String // Materialized path for efficient querying
   manufacturer            String?
   modelNumber             String?
   serialNumber            String?
   purchaseDate            DateTime?
-  purchasePrice           Decimal?  @db.Decimal(10, 2)
+  purchasePrice           Decimal?      @db.Decimal(10, 2)
   description             String?
   link                    String?
   tags                    String[]
   warrantyScope           String?
   warrantyExpiry          DateTime?
-  warrantyLifetime        Boolean   @default(false)
+  warrantyLifetime        Boolean       @default(false)
   secondaryWarrantyScope  String?
   secondaryWarrantyExpiry DateTime?
+  customFields            Json?
   photoPath               String? // Path to main photo
   receiptPath             String? // Path to receipt
   manualPath              String? // Path to manual
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
+  qrCode                  String?       @unique
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  components   Component[]
-  tasks        Task[]
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assetTemplate   AssetTemplate?    @relation(fields: [assetTemplateId], references: [id], onDelete: SetNull)
+  location        Location?         @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  parent          Asset?            @relation("AssetHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children        Asset[]           @relation("AssetHierarchy")
+  components      Component[]
+  tasks           Task[]
+  schedules       Schedule[]
+  attachments     AssetAttachment[]
+  notifications   Notification[]
+  usageCounters   UsageCounter[]
 
   @@index([organizationId])
+  @@index([category])
+  @@index([locationId])
+  @@index([assetTemplateId])
+  @@index([qrCode])
   @@map("assets")
 }
 
@@ -175,6 +339,8 @@ model Task {
   id               String       @id @default(uuid())
   organizationId   String
   assetId          String?
+  scheduleId       String?
+  parentTaskId     String?      // For subtasks
   title            String
   description      String?
   dueDate          DateTime
@@ -186,19 +352,31 @@ model Task {
   actualMinutes    Int?
   completedAt      DateTime?
   skippedAt        DateTime?
+  subtaskOrder     Int          @default(0)
+  completionRequirements Json   @default("{}")
+  isPhotoRequired  Boolean      @default(false)
+  checklistItems   Json         @default("[]")
+  googleEventId    String?      // Google Calendar event ID
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  asset        Asset?           @relation(fields: [assetId], references: [id], onDelete: SetNull)
-  assignments  TaskAssignment[]
-  comments     TaskComment[]
-  attachments  TaskAttachment[]
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  asset         Asset?           @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  schedule      Schedule?        @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  parentTask    Task?            @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks      Task[]           @relation("TaskSubtasks")
+  assignments   TaskAssignment[]
+  comments      TaskComment[]
+  attachments   TaskAttachment[]
+  notifications Notification[]
+  calendarSyncs TaskCalendarSync[]
 
   @@index([organizationId])
   @@index([assetId])
+  @@index([scheduleId])
   @@index([dueDate])
   @@index([status])
+  @@index([parentTaskId])
   @@map("tasks")
 }
 
@@ -225,8 +403,9 @@ model TaskComment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task     Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mentions Mention[]
 
   @@index([taskId])
   @@index([userId])
@@ -251,6 +430,107 @@ model TaskAttachment {
   @@map("task_attachments")
 }
 
+// Phase 2: Enhanced scheduling and notifications
+
+model Schedule {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  assetId            String?
+  name               String
+  description        String?
+  scheduleType       ScheduleType
+  type               String?      // Additional type field for new schedule types
+  startDate          DateTime
+  endDate            DateTime?
+  intervalDays       Int?
+  intervalMonths     Int?
+  customRrule        String?
+  recurrenceRule     String?      // For calendar-based schedules
+  monthlyDayOfMonth  Int?         // For monthly schedules (1-31)
+  seasonalMonths     Json?        // Array of months for seasonal schedules
+  usageThreshold     Float?       // For usage-based schedules
+  currentUsage       Float?       @default(0)
+  lastRunAt          DateTime?    // When tasks were last generated
+  nextRunAt          DateTime?    // When tasks will next be generated
+  nextOccurrence     DateTime?
+  lastOccurrence     DateTime?
+  isActive           Boolean      @default(true)
+  taskTemplate       Json
+  autoCreateAdvance  Int          @default(7) // Days in advance
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  asset         Asset?         @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  tasks         Task[]
+  notifications Notification[]
+  rules         ScheduleRule[]
+  dependencies  ScheduleDependency[] @relation("ScheduleDependencies")
+  dependents    ScheduleDependency[] @relation("ScheduleDependents")
+  usageCounters UsageCounter[]
+
+  @@index([organizationId])
+  @@index([assetId])
+  @@index([nextOccurrence])
+  @@index([isActive])
+  @@map("schedules")
+}
+
+model Notification {
+  id             String               @id @default(uuid())
+  organizationId String
+  userId         String
+  assetId        String?
+  taskId         String?
+  scheduleId     String?
+  type           String
+  title          String
+  message        String
+  data           Json?
+  channel        NotificationChannel? @default(IN_APP)
+  sendInApp      Boolean             @default(true)
+  sendEmail      Boolean             @default(false)
+  sendPush       Boolean             @default(false)
+  isRead         Boolean             @default(false)
+  readAt         DateTime?
+  createdAt      DateTime            @default(now())
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset        Asset?             @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  task         Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  schedule     Schedule?          @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  queueItems   NotificationQueue[]
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AssetAttachment {
+  id               String   @id @default(uuid())
+  assetId          String
+  uploadedByUserId String
+  originalFilename String
+  storedFilename   String
+  filePath         String
+  fileSizeBytes    Int
+  mimeType         String
+  attachmentType   String // 'photo', 'receipt', 'manual', 'other'
+  isPrimary        Boolean  @default(false)
+  uploadDate       DateTime @default(now())
+
+  asset      Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  uploadedBy User  @relation(fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([assetId])
+  @@index([uploadedByUserId])
+  @@index([attachmentType])
+  @@map("asset_attachments")
+}
+
 // Schema migration tracking
 model SchemaMigration {
   id        String   @id @default(uuid())
@@ -261,3 +541,301 @@ model SchemaMigration {
 
   @@map("schema_migrations")
 }
+
+// Phase 3: Advanced Capabilities Models
+
+model UsageCounter {
+  id            String    @id @default(uuid())
+  assetId       String
+  scheduleId    String?
+  counterType   String    // hours_used, cycles_completed, etc.
+  currentValue  Float     @default(0)
+  lastUpdatedAt DateTime  @default(now())
+  lastResetAt   DateTime?
+  resetValue    Float?    @default(0)
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  asset    Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  schedule Schedule? @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+
+  @@unique([assetId, counterType])
+  @@index([assetId])
+  @@index([scheduleId])
+  @@map("usage_counters")
+}
+
+model ScheduleRule {
+  id         String   @id @default(uuid())
+  scheduleId String
+  ruleType   String   // blackout_dates, business_days_only, dependency
+  ruleConfig Json     // Flexible configuration for different rule types
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@map("schedule_rules")
+}
+
+model ScheduleDependency {
+  id                  String   @id @default(uuid())
+  scheduleId          String
+  dependsOnScheduleId String
+  offsetDays          Int?     @default(0) // Days after dependency completion
+  createdAt           DateTime @default(now())
+
+  schedule   Schedule @relation("ScheduleDependencies", fields: [scheduleId], references: [id], onDelete: Cascade)
+  dependsOn  Schedule @relation("ScheduleDependents", fields: [dependsOnScheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@index([dependsOnScheduleId])
+  @@map("schedule_dependencies")
+}
+
+model UserInvitation {
+  id               String           @id @default(uuid())
+  organizationId   String
+  email            String
+  role             UserRole         @default(MEMBER)
+  invitedByUserId  String
+  token            String           @unique
+  status           InvitationStatus @default(PENDING)
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitedBy", fields: [invitedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+  @@map("user_invitations")
+}
+
+model ActivityStream {
+  id             String             @id @default(uuid())
+  organizationId String
+  userId         String
+  action         ActivityAction
+  entityType     ActivityEntityType
+  entityId       String
+  metadata       Json?              @default("{}")
+  createdAt      DateTime           @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("activity_streams")
+}
+
+model UserNotificationPreference {
+  id               String              @id @default(uuid())
+  userId           String
+  channel          NotificationChannel
+  notificationType NotificationType
+  isEnabled        Boolean             @default(true)
+  settings         Json?               @default("{}") // Channel-specific settings
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channel, notificationType])
+  @@map("user_notification_preferences")
+}
+
+model NotificationQueue {
+  id             String              @id @default(uuid())
+  notificationId String
+  channel        NotificationChannel
+  recipientId    String              // Could be userId, email, webhook URL, etc.
+  payload        Json
+  status         String              @default("PENDING") // PENDING, SENT, FAILED
+  attempts       Int                 @default(0)
+  lastAttemptAt  DateTime?
+  sentAt         DateTime?
+  error          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@index([status])
+  @@map("notification_queue")
+}
+
+model WebhookSubscription {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  url            String
+  secret         String   // For signing payloads
+  events         String[] // Array of WebhookEventType
+  isActive       Boolean  @default(true)
+  headers        Json?    @default("{}") // Custom headers to include
+  retryPolicy    Json?    @default("{\"maxRetries\":3,\"retryDelayMs\":1000,\"backoffMultiplier\":2}")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries   WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_subscriptions")
+}
+
+model CalendarIntegration {
+  id              String    @id @default(uuid())
+  userId          String
+  provider        String    @default("google") // For future providers
+  accessToken     String
+  refreshToken    String
+  tokenExpiresAt  DateTime
+  calendarId      String?
+  syncEnabled     Boolean   @default(true)
+  lastSyncAt      DateTime?
+  settings        Json?     @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskSyncs    TaskCalendarSync[]
+
+  @@unique([userId, provider])
+  @@map("calendar_integrations")
+}
+
+model TaskCalendarSync {
+  id                    String   @id @default(uuid())
+  taskId                String
+  calendarIntegrationId String
+  externalEventId       String
+  lastSyncedAt          DateTime @default(now())
+  syncHash              String?  // To detect changes
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  task                Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  calendarIntegration CalendarIntegration @relation(fields: [calendarIntegrationId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, calendarIntegrationId])
+  @@map("task_calendar_sync")
+}
+
+model Mention {
+  id               String   @id @default(uuid())
+  commentId        String
+  mentionedUserId  String
+  notificationSent Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  comment      TaskComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  mentionedUser User       @relation(fields: [mentionedUserId], references: [id], onDelete: Cascade)
+
+  @@index([commentId])
+  @@index([mentionedUserId])
+  @@map("mentions")
+}
+
+model Activity {
+  id                String   @id @default(uuid())
+  eventId           String   @unique // For idempotency
+  organizationId    String
+  
+  // Actor (who performed the action)
+  actorType         String   // 'User'
+  actorId           String   
+  actorName         String   // Denormalized for historical accuracy
+  
+  // Verb (what action was performed)
+  verb              String   // 'created', 'updated', 'deleted', 'completed', 'commented', 'assigned', 'mentioned'
+  
+  // Object (what was acted upon)
+  objectType        String   // 'Task', 'Asset', 'Schedule', 'Comment', 'AssetTemplate'
+  objectId          String
+  objectDisplayName String   // Denormalized display name at time of action
+  
+  // Target (context - project, asset, etc.)
+  targetType        String?  // 'Asset', 'Schedule', 'Project'
+  targetId          String?
+  targetDisplayName String?
+  
+  // Event metadata and changes
+  metadata          Json?    // Contains changeset for updates, additional context
+  
+  timestamp         DateTime // Populated by the worker from the event payload
+  createdAt         DateTime @default(now())
+  
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  @@index([organizationId, targetType, targetId])
+  @@index([organizationId, actorId])
+  @@index([organizationId, objectType, objectId])
+  @@index([organizationId, timestamp(sort: Desc)]) // For fetching latest activities per org
+  @@map("activities")
+}
+
+model GoogleCredentials {
+  id           String   @id @default(uuid())
+  userId       String   @unique // Each user has one set of Google credentials
+  accessToken  String   @db.Text // Encrypted
+  refreshToken String   @db.Text // Encrypted
+  expiryDate   DateTime
+  scope        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("google_credentials")
+}
+model PushSubscription {
+  id        String   @id @default(uuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relation to User
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model WebhookDelivery {
+  id             String   @id @default(uuid())
+  webhookId      String
+  eventId        String
+  eventType      String
+  url            String
+  status         String   @default("pending") // pending, success, failed
+  statusCode     Int?
+  responseBody   String?  @db.Text
+  error          String?  @db.Text
+  attemptCount   Int      @default(0)
+  lastAttemptAt  DateTime?
+  nextRetryAt    DateTime?
+  createdAt      DateTime @default(now())
+  
+  webhook        WebhookSubscription @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  
+  @@index([webhookId])
+  @@index([status])
+  @@index([eventType])
+  @@index([createdAt(sort: Desc)])
+  @@map("webhook_deliveries")
+}
+

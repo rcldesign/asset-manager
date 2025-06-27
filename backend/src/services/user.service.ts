@@ -24,9 +24,30 @@ export interface UpdateUserData {
   totpEnabled?: boolean;
 }
 
+/**
+ * Service for managing users with authentication and authorization.
+ * Provides user CRUD operations, authentication, 2FA, and API token management.
+ * Integrates with permission system for fine-grained access control.
+ *
+ * @class UserService
+ */
 export class UserService {
   /**
-   * Create a new user
+   * Create a new user in an organization.
+   * Validates email uniqueness and organization existence.
+   *
+   * @param {CreateUserData} data - User creation data
+   * @returns {Promise<User>} The created user with organization
+   * @throws {AppError} If email already exists (409) or organization not found (404)
+   *
+   * @example
+   * const user = await userService.createUser({
+   *   email: 'john@example.com',
+   *   password: 'SecurePass123!',
+   *   fullName: 'John Doe',
+   *   organizationId: 'org-123',
+   *   role: 'member'
+   * });
    */
   async createUser(data: CreateUserData): Promise<User> {
     const { email, password, organizationId, ...userData } = data;
@@ -72,7 +93,14 @@ export class UserService {
   }
 
   /**
-   * Find user by ID
+   * Find user by ID.
+   * Includes organization data for context.
+   *
+   * @param {string} id - User ID
+   * @returns {Promise<User | null>} User with organization or null
+   *
+   * @example
+   * const user = await userService.getUserById('user-123');
    */
   async getUserById(id: string): Promise<User | null> {
     return prisma.user.findUnique({
@@ -84,7 +112,14 @@ export class UserService {
   }
 
   /**
-   * Find user by email
+   * Find user by email address.
+   * Email search is case-insensitive.
+   *
+   * @param {string} email - Email address
+   * @returns {Promise<User | null>} User with organization or null
+   *
+   * @example
+   * const user = await userService.findByEmail('john@example.com');
    */
   async findByEmail(email: string): Promise<User | null> {
     return prisma.user.findUnique({
@@ -96,7 +131,25 @@ export class UserService {
   }
 
   /**
-   * Find all users in an organization with permission filtering
+   * Find all users in an organization with permission filtering.
+   * Applies attribute-based access control based on requester permissions.
+   *
+   * @param {string} organizationId - Organization ID
+   * @param {PermissionContext} [requesterContext] - Requester's permission context
+   * @param {Object} [options] - Query options
+   * @param {number} [options.skip] - Number of records to skip
+   * @param {number} [options.take] - Number of records to take
+   * @param {UserRole} [options.role] - Filter by role
+   * @param {boolean} [options.isActive] - Filter by active status
+   * @returns {Promise<Object>} Users array (potentially filtered) and total count
+   * @throws {AppError} If insufficient permissions (403)
+   *
+   * @example
+   * const { users, total } = await userService.findByOrganization(
+   *   'org-123',
+   *   requesterContext,
+   *   { role: 'member', isActive: true, skip: 0, take: 20 }
+   * );
    */
   async findByOrganization(
     organizationId: string,
@@ -142,7 +195,21 @@ export class UserService {
   }
 
   /**
-   * Update user with permission checks
+   * Update user with permission checks.
+   * Filters update data based on requester's allowed attributes.
+   *
+   * @param {string} id - User ID to update
+   * @param {UpdateUserData} data - Update data
+   * @param {PermissionContext} [requesterContext] - Requester's permission context
+   * @returns {Promise<User>} Updated user
+   * @throws {AppError} If user not found (404), email taken (409), or insufficient permissions (403)
+   *
+   * @example
+   * const updated = await userService.updateUser(
+   *   'user-123',
+   *   { fullName: 'Jane Doe', role: 'admin' },
+   *   requesterContext
+   * );
    */
   async updateUser(
     id: string,
@@ -206,7 +273,21 @@ export class UserService {
   }
 
   /**
-   * Change user password
+   * Change user password.
+   * Convenience method that delegates to updatePassword.
+   *
+   * @param {string} userId - User ID
+   * @param {Object} data - Password change data
+   * @param {string} data.currentPassword - Current password for verification
+   * @param {string} data.newPassword - New password to set
+   * @returns {Promise<void>}
+   * @throws {AppError} If validation fails
+   *
+   * @example
+   * await userService.changePassword('user-123', {
+   *   currentPassword: 'OldPass123!',
+   *   newPassword: 'NewPass456!'
+   * });
    */
   async changePassword(
     userId: string,
@@ -216,7 +297,13 @@ export class UserService {
   }
 
   /**
-   * Update user password
+   * Update user password with current password verification.
+   *
+   * @param {string} userId - User ID
+   * @param {string} currentPassword - Current password for verification
+   * @param {string} newPassword - New password to set
+   * @returns {Promise<void>}
+   * @throws {AppError} If user not found (404), no password set (400), or current password incorrect (400)
    */
   async updatePassword(
     userId: string,
@@ -252,7 +339,29 @@ export class UserService {
   }
 
   /**
-   * Authenticate user with email and password
+   * Authenticate user with email and password.
+   * Supports two-factor authentication if enabled.
+   *
+   * @param {string} email - User email
+   * @param {string} password - User password
+   * @param {string} [totpToken] - TOTP token for 2FA
+   * @param {number} [timeForTesting] - Override time for TOTP testing
+   * @returns {Promise<Object | null>} User and 2FA status or null if authentication fails
+   * @throws {AppError} If 2FA enabled but secret missing (500)
+   *
+   * @example
+   * // Initial authentication
+   * const result = await userService.authenticateUser('john@example.com', 'password');
+   * if (result?.requiresTwoFactor) {
+   *   // Prompt for 2FA token
+   * }
+   *
+   * // With 2FA token
+   * const result = await userService.authenticateUser(
+   *   'john@example.com',
+   *   'password',
+   *   '123456'
+   * );
    */
   async authenticateUser(
     email: string,
@@ -286,7 +395,13 @@ export class UserService {
   }
 
   /**
-   * Verify user password
+   * Verify user password without 2FA.
+   * Returns user only if password is valid and account is active.
+   *
+   * @param {string} email - User email
+   * @param {string} password - Password to verify
+   * @returns {Promise<User | null>} User if valid, null otherwise
+   * @private
    */
   async verifyPassword(email: string, password: string): Promise<User | null> {
     const user = await prisma.user.findUnique({
@@ -305,7 +420,16 @@ export class UserService {
   }
 
   /**
-   * Delete user (soft delete by deactivating) with permission checks
+   * Delete user (soft delete by deactivating) with permission checks.
+   * User data is retained but account is deactivated.
+   *
+   * @param {string} id - User ID to delete
+   * @param {PermissionContext} [requesterContext] - Requester's permission context
+   * @returns {Promise<void>}
+   * @throws {AppError} If user not found (404) or insufficient permissions (403)
+   *
+   * @example
+   * await userService.deleteUser('user-123', requesterContext);
    */
   async deleteUser(id: string, requesterContext?: PermissionContext): Promise<void> {
     // Permission check if context provided
@@ -335,7 +459,19 @@ export class UserService {
   }
 
   /**
-   * Setup two-factor authentication
+   * Setup two-factor authentication for a user.
+   * Generates TOTP secret and QR code for authenticator apps.
+   *
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} TOTP setup data
+   * @returns {string} returns.secret - Base32 encoded secret
+   * @returns {string} returns.qrCodeUrl - QR code URL for authenticator apps
+   * @returns {string} returns.manualEntryKey - Formatted key for manual entry
+   * @throws {AppError} If user not found (404)
+   *
+   * @example
+   * const { qrCodeUrl, manualEntryKey } = await userService.setupTwoFactor('user-123');
+   * // Display QR code to user for scanning
    */
   async setupTwoFactor(userId: string): Promise<{
     secret: string;
@@ -365,7 +501,17 @@ export class UserService {
   }
 
   /**
-   * Enable two-factor authentication
+   * Enable two-factor authentication after setup.
+   * Verifies TOTP token before enabling 2FA.
+   *
+   * @param {string} userId - User ID
+   * @param {string} totpToken - TOTP token to verify
+   * @param {number} [timeForTesting] - Override time for TOTP testing
+   * @returns {Promise<void>}
+   * @throws {AppError} If user not found (404), no secret (400), or invalid token (400)
+   *
+   * @example
+   * await userService.enableTwoFactor('user-123', '123456');
    */
   async enableTwoFactor(userId: string, totpToken: string, timeForTesting?: number): Promise<void> {
     // Get the user and their temporary TOTP secret
@@ -395,7 +541,17 @@ export class UserService {
   }
 
   /**
-   * Disable two-factor authentication
+   * Disable two-factor authentication.
+   * Requires valid TOTP token for security.
+   *
+   * @param {string} userId - User ID
+   * @param {string} totpToken - TOTP token for verification
+   * @param {number} [timeForTesting] - Override time for TOTP testing
+   * @returns {Promise<void>}
+   * @throws {AppError} If user not found (404), 2FA not enabled (400), or invalid token (400)
+   *
+   * @example
+   * await userService.disableTwoFactor('user-123', '123456');
    */
   async disableTwoFactor(
     userId: string,
@@ -432,7 +588,14 @@ export class UserService {
   }
 
   /**
-   * Verify user email
+   * Verify user email address.
+   * Marks email as verified in the system.
+   *
+   * @param {string} userId - User ID
+   * @returns {Promise<void>}
+   *
+   * @example
+   * await userService.verifyEmail('user-123');
    */
   async verifyEmail(userId: string): Promise<void> {
     await prisma.user.update({
@@ -442,7 +605,24 @@ export class UserService {
   }
 
   /**
-   * Create API token for user with permission checks
+   * Create API token for user with permission checks.
+   * Generates secure token with SHA-256 hashing.
+   *
+   * @param {string} userId - User ID
+   * @param {Object} data - Token creation data
+   * @param {string} data.name - Token name/description
+   * @param {Date} [data.expiresAt] - Optional expiration date
+   * @param {PermissionContext} [requesterContext] - Requester's permission context
+   * @returns {Promise<Object>} Created token details (token shown only once)
+   * @throws {AppError} If insufficient permissions (403)
+   *
+   * @example
+   * const { token, id } = await userService.createApiToken(
+   *   'user-123',
+   *   { name: 'CI/CD Token', expiresAt: new Date('2025-01-01') },
+   *   requesterContext
+   * );
+   * // Save the token securely - it cannot be retrieved again
    */
   async createApiToken(
     userId: string,
@@ -488,7 +668,14 @@ export class UserService {
   }
 
   /**
-   * Generate API token for user
+   * Generate API token for user without permission checks.
+   * Legacy method - prefer createApiToken for new code.
+   *
+   * @param {string} userId - User ID
+   * @param {string} name - Token name
+   * @param {Date} [expiresAt] - Optional expiration
+   * @returns {Promise<string>} The generated token
+   * @deprecated Use createApiToken instead
    */
   async generateApiToken(userId: string, name: string, expiresAt?: Date): Promise<string> {
     const token = generateSecureToken(32);
@@ -509,7 +696,18 @@ export class UserService {
   }
 
   /**
-   * Validate API token
+   * Validate API token and return associated user.
+   * Supports both new SHA-256 and legacy bcrypt tokens.
+   * Updates last used timestamp on successful validation.
+   *
+   * @param {string} token - API token to validate
+   * @returns {Promise<User | null>} User if token valid and not expired, null otherwise
+   *
+   * @example
+   * const user = await userService.validateApiToken('sk_live_abc123...');
+   * if (user) {
+   *   // Token is valid, proceed with authenticated request
+   * }
    */
   async validateApiToken(token: string): Promise<User | null> {
     const hashedToken = createHash('sha256').update(token).digest('hex');
@@ -602,7 +800,17 @@ export class UserService {
   }
 
   /**
-   * Revoke API token with permission checks
+   * Revoke API token with permission checks.
+   * Permanently deletes the token.
+   *
+   * @param {string} userId - User ID who owns the token
+   * @param {string} tokenId - Token ID to revoke
+   * @param {PermissionContext} [requesterContext] - Requester's permission context
+   * @returns {Promise<void>}
+   * @throws {AppError} If token not found (400) or insufficient permissions (403)
+   *
+   * @example
+   * await userService.revokeApiToken('user-123', 'token-456', requesterContext);
    */
   async revokeApiToken(
     userId: string,
@@ -644,7 +852,19 @@ export class UserService {
   }
 
   /**
-   * List user's API tokens with permission checks
+   * List user's API tokens with permission checks.
+   * Returns metadata only - actual tokens are never shown.
+   *
+   * @param {string} userId - User ID
+   * @param {PermissionContext} [requesterContext] - Requester's permission context
+   * @returns {Promise<Array>} Array of token metadata
+   * @throws {AppError} If insufficient permissions (403)
+   *
+   * @example
+   * const tokens = await userService.listApiTokens('user-123', requesterContext);
+   * tokens.forEach(token => {
+   *   console.log(`${token.name}: last used ${token.lastUsed}`);
+   * });
    */
   async listApiTokens(
     userId: string,
@@ -689,7 +909,20 @@ export class UserService {
   }
 
   /**
-   * Get filtered user data based on permissions
+   * Get filtered user data based on permissions.
+   * Returns only attributes the requester is allowed to see.
+   *
+   * @param {string} id - User ID to retrieve
+   * @param {PermissionContext} requesterContext - Requester's permission context
+   * @returns {Promise<Partial<User> | null>} Filtered user data or null
+   * @throws {AppError} If insufficient permissions (403)
+   *
+   * @example
+   * const userData = await userService.getUserWithPermissions(
+   *   'user-123',
+   *   requesterContext
+   * );
+   * // May return limited fields based on permissions
    */
   async getUserWithPermissions(
     id: string,
@@ -720,7 +953,23 @@ export class UserService {
   }
 
   /**
-   * Check if user can perform action on another user
+   * Check if user can perform action on another user.
+   * Useful for pre-validation before attempting operations.
+   *
+   * @param {PermissionContext} requesterContext - Requester's permission context
+   * @param {string} targetUserId - Target user ID
+   * @param {'read' | 'update' | 'delete'} action - Action to check
+   * @returns {Promise<boolean>} True if action is allowed
+   *
+   * @example
+   * const canEdit = await userService.canPerformAction(
+   *   requesterContext,
+   *   'user-456',
+   *   'update'
+   * );
+   * if (!canEdit) {
+   *   throw new Error('Cannot edit this user');
+   * }
    */
   async canPerformAction(
     requesterContext: PermissionContext,

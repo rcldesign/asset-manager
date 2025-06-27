@@ -15,7 +15,11 @@ export type Resource =
   | 'task'
   | 'api-token'
   | 'file'
-  | 'report';
+  | 'report'
+  | 'location'
+  | 'asset-template'
+  | 'schedule'
+  | 'notification';
 
 export type Action = 'create' | 'read' | 'update' | 'delete' | 'manage'; // Special action that includes all CRUD operations
 
@@ -90,6 +94,10 @@ export class PermissionManager {
       { permission: 'read:organization', attributes: ['id', 'name', 'createdAt'] },
       { permission: 'read:user:any', attributes: ['id', 'email', 'fullName', 'role'] },
       { permission: 'read:file:any', attributes: ['originalFilename', 'mimeType', 'uploadDate'] },
+      { permission: 'read:location:any' },
+      { permission: 'read:asset-template:any' },
+      { permission: 'read:schedule:any' },
+      { permission: 'read:notification:own' },
     ]);
 
     // MEMBER permissions - can manage own resources and create new ones
@@ -109,6 +117,8 @@ export class PermissionManager {
       { permission: 'create:api-token:own' },
       { permission: 'delete:api-token:own' },
       { permission: 'update:user:own', attributes: ['fullName', 'totpEnabled'] },
+      { permission: 'create:location:any' },
+      { permission: 'update:notification:own', attributes: ['isRead', 'readAt'] },
     ]);
 
     // MANAGER permissions - can manage most resources for the organization
@@ -128,6 +138,13 @@ export class PermissionManager {
       { permission: 'read:api-token:any' },
       { permission: 'delete:api-token:any' },
       { permission: 'read:report:any' },
+      { permission: 'manage:location:any' },
+      { permission: 'manage:asset-template:any' },
+      { permission: 'create:schedule:any' },
+      { permission: 'update:schedule:any' },
+      { permission: 'delete:schedule:any' },
+      { permission: 'read:notification:any' },
+      { permission: 'create:notification:any' },
     ]);
 
     // OWNER permissions - full access to all resources
@@ -142,6 +159,10 @@ export class PermissionManager {
       { permission: 'manage:file:any' },
       { permission: 'manage:api-token:any' },
       { permission: 'manage:report:any' },
+      { permission: 'manage:location:any' },
+      { permission: 'manage:asset-template:any' },
+      { permission: 'manage:schedule:any' },
+      { permission: 'manage:notification:any' },
     ]);
   }
 

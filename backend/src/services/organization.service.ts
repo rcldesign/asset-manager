@@ -17,13 +17,25 @@ export interface UpdateOrganizationData {
 }
 
 /**
- * Service for managing organizations and their relationships with users
+ * Service for managing organizations and their relationships with users.
+ * Handles organization lifecycle, ownership transfers, and member management.
+ * Organizations are the top-level entity for multi-tenancy.
+ *
+ * @class OrganizationService
  */
 export class OrganizationService {
   /**
-   * Create a new organization without an owner
-   * @param data - Organization creation data containing name
-   * @returns Promise resolving to the created organization
+   * Create a new organization without an owner.
+   * Used for system-level organization creation.
+   *
+   * @param {Object} data - Organization creation data
+   * @param {string} data.name - Organization name
+   * @returns {Promise<Organization>} The created organization
+   *
+   * @example
+   * const org = await organizationService.createOrganization({
+   *   name: 'Acme Corporation'
+   * });
    */
   async createOrganization(data: { name: string }): Promise<Organization> {
     return prisma.organization.create({
@@ -32,10 +44,20 @@ export class OrganizationService {
   }
 
   /**
-   * Create a new organization with an owner user in a single transaction
-   * @param data - Organization and owner creation data
-   * @returns Promise resolving to organization and owner user objects
-   * @throws {AppError} When email is already in use
+   * Create a new organization with an owner user in a single transaction.
+   * This is the primary method for organization creation in the application.
+   *
+   * @param {CreateOrganizationData} data - Organization and owner creation data
+   * @returns {Promise<Object>} Object containing created organization and owner user
+   * @throws {AppError} When email is already in use (409)
+   *
+   * @example
+   * const { organization, owner } = await organizationService.create({
+   *   name: 'Tech Startup Inc',
+   *   ownerEmail: 'founder@techstartup.com',
+   *   ownerPassword: 'SecurePass123!',
+   *   ownerFullName: 'Jane Smith'
+   * });
    */
   async create(data: CreateOrganizationData): Promise<{
     organization: Organization;
@@ -85,9 +107,17 @@ export class OrganizationService {
   }
 
   /**
-   * Find an organization by its ID with related data
-   * @param id - Organization ID to search for
-   * @returns Promise resolving to organization with owner and counts, or null if not found
+   * Find an organization by its ID with related data.
+   * Includes owner information and entity counts.
+   *
+   * @param {string} id - Organization ID to search for
+   * @returns {Promise<Organization | null>} Organization with owner and counts, or null if not found
+   *
+   * @example
+   * const org = await organizationService.getOrganizationById('org-123');
+   * if (org) {
+   *   console.log(`${org.name} has ${org._count.users} users`);
+   * }
    */
   async getOrganizationById(id: string): Promise<Organization | null> {
     return prisma.organization.findUnique({
@@ -106,12 +136,22 @@ export class OrganizationService {
   }
 
   /**
-   * Find all organizations with pagination and search (admin only)
-   * @param options - Query options for pagination and search
-   * @param options.skip - Number of records to skip for pagination
-   * @param options.take - Number of records to take for pagination
-   * @param options.search - Search term to filter by name or owner email
-   * @returns Promise resolving to organizations array and total count
+   * Find all organizations with pagination and search (admin only).
+   * Searches in organization name and owner email.
+   *
+   * @param {Object} [options] - Query options
+   * @param {number} [options.skip] - Number of records to skip for pagination
+   * @param {number} [options.take] - Number of records to take for pagination
+   * @param {string} [options.search] - Search term to filter by name or owner email
+   * @returns {Promise<Object>} Organizations array and total count
+   *
+   * @example
+   * const { organizations, total } = await organizationService.findAll({
+   *   skip: 0,
+   *   take: 20,
+   *   search: 'tech'
+   * });
+   * console.log(`Found ${total} organizations`);
    */
   async findAll(options?: {
     skip?: number;
@@ -151,11 +191,19 @@ export class OrganizationService {
   }
 
   /**
-   * Update an organization's data
-   * @param id - Organization ID to update
-   * @param data - Update data for the organization
-   * @returns Promise resolving to the updated organization
-   * @throws {AppError} When organization is not found
+   * Update an organization's data.
+   * Currently only supports name updates.
+   *
+   * @param {string} id - Organization ID to update
+   * @param {UpdateOrganizationData} data - Update data
+   * @returns {Promise<Organization>} The updated organization with counts
+   * @throws {AppError} When organization is not found (404)
+   *
+   * @example
+   * const updated = await organizationService.updateOrganization(
+   *   'org-123',
+   *   { name: 'New Company Name' }
+   * );
    */
   async updateOrganization(id: string, data: UpdateOrganizationData): Promise<Organization> {
     const organization = await prisma.organization.findUnique({
@@ -183,9 +231,16 @@ export class OrganizationService {
   }
 
   /**
-   * Delete an organization and all its related data (cascade delete)
-   * @param id - Organization ID to delete
-   * @throws {AppError} When organization is not found
+   * Delete an organization and all its related data (cascade delete).
+   * This is a destructive operation that removes all users, assets, tasks, etc.
+   *
+   * @param {string} id - Organization ID to delete
+   * @returns {Promise<void>}
+   * @throws {AppError} When organization is not found (404)
+   *
+   * @example
+   * await organizationService.deleteOrganization('org-123');
+   * // All related data is permanently deleted
    */
   async deleteOrganization(id: string): Promise<void> {
     const organization = await prisma.organization.findUnique({
@@ -203,10 +258,24 @@ export class OrganizationService {
   }
 
   /**
-   * Get comprehensive statistics for an organization
-   * @param id - Organization ID to get statistics for
-   * @returns Promise resolving to statistics object with counts and breakdowns
-   * @throws {AppError} When organization is not found
+   * Get comprehensive statistics for an organization.
+   * Provides aggregated data for dashboards and reporting.
+   *
+   * @param {string} id - Organization ID
+   * @returns {Promise<Object>} Statistics object with:
+   *   - totalUsers: Total user count
+   *   - activeUsers: Active user count
+   *   - totalAssets: Total asset count
+   *   - totalTasks: Total task count
+   *   - tasksByStatus: Task counts grouped by status
+   *   - usersByRole: User counts grouped by role
+   *   - organizationAge: Age in days since creation
+   * @throws {AppError} When organization is not found (404)
+   *
+   * @example
+   * const stats = await organizationService.getStatistics('org-123');
+   * console.log(`Organization is ${stats.organizationAge} days old`);
+   * console.log(`Active users: ${stats.activeUsers}/${stats.totalUsers}`);
    */
   async getStatistics(id: string): Promise<{
     totalUsers: number;
@@ -272,12 +341,21 @@ export class OrganizationService {
   }
 
   /**
-   * Transfer organization ownership from current owner to another user
-   * @param organizationId - ID of the organization
-   * @param newOwnerId - ID of the user to become the new owner
-   * @param currentOwnerId - ID of the current owner (for verification)
-   * @returns Promise resolving to the updated organization
-   * @throws {AppError} When organization not found, current owner verification fails, or new owner not found
+   * Transfer organization ownership from current owner to another user.
+   * Old owner becomes a manager, new owner gets owner role.
+   *
+   * @param {string} organizationId - ID of the organization
+   * @param {string} newOwnerId - ID of the user to become the new owner
+   * @param {string} currentOwnerId - ID of the current owner (for verification)
+   * @returns {Promise<Organization>} The updated organization
+   * @throws {AppError} When organization not found (404), not current owner (403), or new owner not found (404)
+   *
+   * @example
+   * const updated = await organizationService.transferOwnership(
+   *   'org-123',
+   *   'user-456',  // new owner
+   *   'user-789'   // current owner
+   * );
    */
   async transferOwnership(
     organizationId: string,
@@ -346,10 +424,14 @@ export class OrganizationService {
   }
 
   /**
-   * Set a user as the organization owner (internal use)
-   * @param organizationId - ID of the organization
-   * @param userId - ID of the user to set as owner
-   * @throws {AppError} When organization or user is not found
+   * Set a user as the organization owner (internal use).
+   * Used for administrative operations or data migrations.
+   *
+   * @param {string} organizationId - ID of the organization
+   * @param {string} userId - ID of the user to set as owner
+   * @returns {Promise<void>}
+   * @throws {AppError} When organization not found (404) or user not found (404)
+   * @private
    */
   async setOwner(organizationId: string, userId: string): Promise<void> {
     // Verify organization exists
@@ -387,9 +469,15 @@ export class OrganizationService {
   }
 
   /**
-   * Get all members of an organization
-   * @param organizationId - ID of the organization to get members for
-   * @returns Promise resolving to array of user objects
+   * Get all members of an organization.
+   * Returns users sorted by creation date (newest first).
+   *
+   * @param {string} organizationId - ID of the organization
+   * @returns {Promise<User[]>} Array of organization members
+   *
+   * @example
+   * const members = await organizationService.getMembers('org-123');
+   * console.log(`Organization has ${members.length} members`);
    */
   async getMembers(organizationId: string): Promise<User[]> {
     return prisma.user.findMany({
@@ -399,11 +487,25 @@ export class OrganizationService {
   }
 
   /**
-   * Add a new user to an organization
-   * @param organizationId - ID of the organization to add user to
-   * @param userData - User data including email, optional password, name, and role
-   * @returns Promise resolving to the created user
-   * @throws {AppError} When organization not found or attempting to create another owner
+   * Add a new user to an organization.
+   * Prevents creating multiple owners per organization.
+   *
+   * @param {string} organizationId - ID of the organization
+   * @param {Object} userData - User creation data
+   * @param {string} userData.email - User email address
+   * @param {string} [userData.password] - Optional password
+   * @param {string} [userData.fullName] - Optional full name
+   * @param {UserRole} [userData.role='MEMBER'] - User role (cannot be OWNER)
+   * @returns {Promise<User>} The created user
+   * @throws {AppError} When organization not found (404) or trying to create another owner (400)
+   *
+   * @example
+   * const user = await organizationService.addUser('org-123', {
+   *   email: 'newuser@example.com',
+   *   password: 'TempPass123!',
+   *   fullName: 'New User',
+   *   role: 'MANAGER'
+   * });
    */
   async addUser(
     organizationId: string,
@@ -438,10 +540,17 @@ export class OrganizationService {
   }
 
   /**
-   * Remove a user from an organization (soft delete)
-   * @param organizationId - ID of the organization
-   * @param userId - ID of the user to remove
-   * @throws {AppError} When user not found in organization or attempting to remove owner
+   * Remove a user from an organization (soft delete).
+   * Cannot remove the organization owner.
+   *
+   * @param {string} organizationId - ID of the organization
+   * @param {string} userId - ID of the user to remove
+   * @returns {Promise<void>}
+   * @throws {AppError} When user not found in organization (404) or attempting to remove owner (400)
+   *
+   * @example
+   * await organizationService.removeUser('org-123', 'user-456');
+   * // User is deactivated but data is retained
    */
   async removeUser(organizationId: string, userId: string): Promise<void> {
     const user = await prisma.user.findFirst({
@@ -467,9 +576,12 @@ export class OrganizationService {
 }
 
 /**
- * Helper function to hash passwords using bcrypt
- * @param password - Plain text password to hash
- * @returns Promise resolving to hashed password
+ * Helper function to hash passwords using bcrypt.
+ * Uses 12 rounds for optimal security/performance balance.
+ *
+ * @param {string} password - Plain text password to hash
+ * @returns {Promise<string>} Hashed password
+ * @private
  */
 async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);

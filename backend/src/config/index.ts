@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import { z } from 'zod';
+import * as path from 'path';
 
 /**
  * Configuration module for the DumbAssets Enhanced application
@@ -61,6 +62,32 @@ const envSchema = z.object({
   // File Upload
   UPLOAD_DIR: z.string().default('./uploads'),
   MAX_FILE_SIZE: z.string().default('10485760').transform(Number), // 10MB
+  UPLOADS_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true'),
+  UPLOAD_TEMP_DIR: z.string().optional(),
+  UPLOAD_QUARANTINE_DIR: z.string().optional(),
+
+  // File Storage
+  FILE_STORAGE_TYPE: z.enum(['local', 'smb']).default('local'),
+  SMB_HOST: z.string().optional(),
+  SMB_SHARE: z.string().optional(),
+  SMB_USERNAME: z.string().optional(),
+  SMB_PASSWORD: z.string().optional(),
+  SMB_DOMAIN: z.string().optional(),
+
+  // Security
+  ENABLE_MALWARE_SCANNING: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
+  CLAMAV_HOST: z.string().default('localhost'),
+  CLAMAV_PORT: z.string().default('3310').transform(Number),
+  CLAMAV_TIMEOUT: z.string().default('30000').transform(Number),
+  MAX_TOTAL_UPLOAD_SIZE: z.string().default('104857600').transform(Number), // 100MB
+  MAX_FIELD_SIZE: z.string().default('1048576').transform(Number), // 1MB
+  MAX_HEADER_PAIRS: z.string().default('100').transform(Number),
 
   // SMTP (optional)
   SMTP_HOST: z.string().optional(),
@@ -157,8 +184,28 @@ export const config = {
   },
 
   upload: {
-    dir: env.UPLOAD_DIR,
+    dir: path.resolve(env.UPLOAD_DIR),
     maxFileSize: env.MAX_FILE_SIZE,
+    enabled: env.UPLOADS_ENABLED,
+    tempDir: env.UPLOAD_TEMP_DIR
+      ? path.resolve(env.UPLOAD_TEMP_DIR)
+      : path.join(path.resolve(env.UPLOAD_DIR), 'temp'),
+    quarantineDir: env.UPLOAD_QUARANTINE_DIR
+      ? path.resolve(env.UPLOAD_QUARANTINE_DIR)
+      : path.join(path.resolve(env.UPLOAD_DIR), 'quarantine'),
+  },
+
+  fileStorage: {
+    type: env.FILE_STORAGE_TYPE,
+    smb: env.SMB_HOST
+      ? {
+          host: env.SMB_HOST,
+          share: env.SMB_SHARE!,
+          username: env.SMB_USERNAME,
+          password: env.SMB_PASSWORD,
+          domain: env.SMB_DOMAIN,
+        }
+      : null,
   },
 
   smtp: env.SMTP_HOST
@@ -170,6 +217,24 @@ export const config = {
         from: env.SMTP_FROM || 'noreply@dumbassets.local',
       }
     : null,
+
+  email: {
+    enabled: !!env.SMTP_HOST,
+    from: env.SMTP_FROM || 'noreply@dumbassets.local',
+    smtp: env.SMTP_HOST
+      ? {
+          host: env.SMTP_HOST,
+          port: env.SMTP_PORT || 587,
+          secure: env.SMTP_PORT === 465,
+          user: env.SMTP_USER || '',
+          pass: env.SMTP_PASSWORD || '',
+        }
+      : undefined,
+  },
+
+  app: {
+    baseUrl: process.env.BASE_URL || 'http://localhost:3000',
+  },
 
   oidc: env.OIDC_ISSUER_URL
     ? {
@@ -194,6 +259,24 @@ export const config = {
   logging: {
     level: env.LOG_LEVEL,
     enableMetrics: env.ENABLE_METRICS,
+  },
+
+  security: {
+    enableMalwareScanning: env.ENABLE_MALWARE_SCANNING,
+    clamav: {
+      host: env.CLAMAV_HOST,
+      port: env.CLAMAV_PORT,
+      timeout: env.CLAMAV_TIMEOUT,
+    },
+    fileUpload: {
+      maxTotalUploadSize: env.MAX_TOTAL_UPLOAD_SIZE,
+      maxFieldSize: env.MAX_FIELD_SIZE,
+      maxHeaderPairs: env.MAX_HEADER_PAIRS,
+    },
+  },
+
+  totp: {
+    issuer: process.env.TOTP_ISSUER || 'DumbAssets',
   },
 };
 

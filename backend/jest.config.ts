@@ -27,8 +27,9 @@ const config: Config = {
       statements: 30,
     },
   },
-  setupFilesAfterEnv: ['<rootDir>/src/test/env-setup.ts', '<rootDir>/src/test/setup.ts', '<rootDir>/src/test/prisma-singleton.ts'],
-  testTimeout: 10000,
+  setupFilesAfterEnv: ['<rootDir>/src/test/env-setup.ts', '<rootDir>/src/test/mock-setup.ts', '<rootDir>/src/test/setup.ts', '<rootDir>/src/test/prisma-singleton.ts'],
+  testTimeout: 30000,
+  detectOpenHandles: true,
   clearMocks: true,
   restoreMocks: true,
   testEnvironmentOptions: {

@@ -58,7 +58,7 @@ const assetTemplateImportObjectSchema = zod.object({
   description: zod.string().optional(),
   category: zod.enum([
     'HARDWARE',
-    'SOFTWARE', 
+    'SOFTWARE',
     'FURNITURE',
     'VEHICLE',
     'EQUIPMENT',
@@ -405,11 +405,22 @@ router.post(
     const authenticatedReq = req as AuthenticatedRequest;
     try {
       const { user } = authenticatedReq;
-      const { templates, conflictStrategy = 'skip' } = authenticatedReq.body as AssetTemplateImportBody;
+      const { templates, conflictStrategy = 'skip' } =
+        authenticatedReq.body as AssetTemplateImportBody;
+
+      // Transform templates to ensure all required fields have defaults
+      const normalizedTemplates = templates.map((template) => ({
+        name: template.name,
+        description: template.description || null,
+        category: template.category,
+        defaultFields: (template.defaultFields || {}) as any,
+        customFields: (template.customFields || {}) as any,
+        isActive: template.isActive !== undefined ? template.isActive : true,
+      }));
 
       const result = await assetTemplateService.importTemplates(
         user.organizationId,
-        templates,
+        normalizedTemplates,
         conflictStrategy,
       );
 
@@ -762,7 +773,11 @@ router.post(
       const { templateId } = authenticatedReq.params as AssetTemplateParamsBody;
       const { values } = authenticatedReq.body as CustomFieldValidationBody;
 
-      const validation = await assetTemplateService.validateCustomFieldValues(templateId, values, user.organizationId);
+      const validation = await assetTemplateService.validateCustomFieldValues(
+        templateId,
+        values,
+        user.organizationId,
+      );
       res.json(validation);
     } catch (error) {
       next(error);

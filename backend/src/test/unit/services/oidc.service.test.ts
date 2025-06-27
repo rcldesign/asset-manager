@@ -13,32 +13,38 @@ jest.mock('openid-client', () => ({
     const url = new URL('https://mock-provider.test/auth');
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined) {
-        url.searchParams.set(key, String(value));
+        url.searchParams.set(key, value as string);
       }
     });
     return url;
   }),
-  authorizationCodeGrant: jest.fn(() => Promise.resolve({
-    access_token: 'mock-access-token',
-    id_token: 'mock-id-token',
-    refresh_token: 'mock-refresh-token',
-    token_type: 'Bearer',
-    expires_in: 3600,
-    scope: 'openid email profile'
-  })),
-  fetchUserInfo: jest.fn(() => Promise.resolve({
-    sub: 'user-123',
-    email: 'test@example.com',
-    name: 'Test User'
-  })),
-  refreshTokenGrant: jest.fn(() => Promise.resolve({
-    access_token: 'mock-new-access-token',
-    id_token: 'mock-new-id-token',
-    refresh_token: undefined,
-    token_type: 'Bearer',
-    expires_in: 3600,
-    scope: undefined
-  })),
+  authorizationCodeGrant: jest.fn(() =>
+    Promise.resolve({
+      access_token: 'mock-access-token',
+      id_token: 'mock-id-token',
+      refresh_token: 'mock-refresh-token',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'openid email profile',
+    }),
+  ),
+  fetchUserInfo: jest.fn(() =>
+    Promise.resolve({
+      sub: 'user-123',
+      email: 'test@example.com',
+      name: 'Test User',
+    }),
+  ),
+  refreshTokenGrant: jest.fn(() =>
+    Promise.resolve({
+      access_token: 'mock-new-access-token',
+      id_token: 'mock-new-id-token',
+      refresh_token: undefined,
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: undefined,
+    }),
+  ),
   ClientSecretPost: mockClientSecretPost,
   AuthorizationResponseError: class extends Error {
     error: string;
@@ -46,13 +52,13 @@ jest.mock('openid-client', () => ({
       super(message);
       this.error = 'invalid_grant';
     }
-  }
+  },
 }));
 
 // Mock the logger to avoid console output during tests
 jest.mock('../../../utils/logger');
 
-// Mock config to provide test configuration  
+// Mock config to provide test configuration
 const mockOidcConfig = {
   issuerUrl: 'https://mock-provider.test',
   clientId: 'test-client-id',
@@ -85,16 +91,16 @@ describe('OIDCService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     // Reset the singleton instance correctly
     _testResetOIDCServiceInstance();
-    
+
     // Reset config to have oidc enabled
     mockConfig.oidc = mockOidcConfig;
-    
+
     // Create a test instance directly with the mock config
     testService = new OIDCService(mockOidcConfig);
-    
+
     // Create a proper mock configuration that matches openid-client's Configuration interface
     mockConfiguration = {
       serverMetadata: jest.fn().mockReturnValue({
@@ -111,10 +117,10 @@ describe('OIDCService', () => {
       client_secret: 'test-client-secret',
       metadata: {
         client_id: 'test-client-id',
-        client_secret: 'test-client-secret'
-      }
+        client_secret: 'test-client-secret',
+      },
     };
-    
+
     // Set up the service with mock configuration
     (testService as any)._testSetConfiguration(mockConfiguration, true);
   });
@@ -134,7 +140,7 @@ describe('OIDCService', () => {
       // Create a new instance with no config
       const unconfiguredService = new OIDCService(null);
       (unconfiguredService as any)._testSetConfiguration(null, false);
-      
+
       expect(unconfiguredService.isAvailable()).toBe(false);
     });
   });
@@ -153,7 +159,6 @@ describe('OIDCService', () => {
         nonce,
       });
     });
-
   });
 
   describe('exchangeCodeForTokens', () => {
@@ -195,13 +200,12 @@ describe('OIDCService', () => {
         ),
       ).rejects.toThrow(ValidationError);
     });
-
   });
 
   describe('getUserInfo', () => {
     it('should get user info successfully', async () => {
       const accessToken = 'access-token';
-      
+
       const result = await testService.getUserInfo(accessToken);
 
       expect(result).toEqual({
@@ -214,7 +218,6 @@ describe('OIDCService', () => {
         email_verified: true,
       });
     });
-
   });
 
   describe('refreshTokens', () => {
@@ -232,7 +235,6 @@ describe('OIDCService', () => {
         scope: 'openid email profile',
       });
     });
-
   });
 
   describe('generateLogoutUrl', () => {
@@ -244,7 +246,7 @@ describe('OIDCService', () => {
 
       expect(result).toContain('https://mock-provider.test/logout');
       expect(mockConfiguration.serverMetadata).toHaveBeenCalled();
-      
+
       if (result) {
         const url = new URL(result);
         expect(url.searchParams.get('id_token_hint')).toBe(idTokenHint);
@@ -258,6 +260,5 @@ describe('OIDCService', () => {
       expect(result).toBe('https://mock-provider.test/logout');
       expect(mockConfiguration.serverMetadata).toHaveBeenCalled();
     });
-
   });
 });

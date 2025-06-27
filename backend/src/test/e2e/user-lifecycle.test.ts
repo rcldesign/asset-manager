@@ -113,11 +113,15 @@ describe('E2E: Complete User Lifecycle', () => {
     await cleanupTestDatabase(dbHelper);
     // Disconnect from Redis
     if (redisClient) {
+      redisClient.disconnect();
       await redisClient.quit();
     }
     _test_only_stopCleanupInterval(); // Stop the auth cleanup timer
     _test_only_stopOidcCleanupInterval(); // Stop the OIDC cleanup timer
-  });
+
+    // Give connections time to close
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }, 30000);
 
   beforeEach(async () => {
     jest.clearAllMocks(); // Reset all mock state between tests
