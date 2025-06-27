@@ -80,9 +80,9 @@
 *   [x] **Tests:** **Unit Tests:** Backend: Advanced scheduling logic (seasonal, usage-based, dependencies, blackout dates), multi-user task assignment, subtask logic, invitation system, @mention parsing, activity stream generation, all notification channel integrations (Email, PWA Push, Apprise, Webhooks), Google Calendar sync logic, iCalendar generation. (Ref: PHASES.md) ✅ COMPLETED
 *   [x] **Tests:** **Unit Tests:** Frontend: Advanced schedule forms, task components with multi-assign/subtasks, invitation UI, notification preferences UI. ✅ COMPLETED
 *   [x] **Tests:** **Integration Tests:** Full lifecycle for each advanced schedule type. Google Calendar API sync (create, update, delete tasks). SMTP service integration. Apprise notification dispatch. Webhook event triggering. (Ref: PHASES.md) ✅ COMPLETED
-*   [ ] **Tests:** **E2E Tests:** Create an asset, add a seasonal schedule, verify task generation over a year. Assign a task to multiple users. Invite a new user. Test @mentions in comments trigger notification. Sync tasks with Google Calendar and verify. (Ref: PHASES.md) ⚠️ NOT IMPLEMENTED - FRONTEND WORK NEEDED
-*   [ ] **Tests:** **Manual Tests:** Thoroughly test all advanced scheduling options. Verify all notification channels (email content, push display, Apprise messages, webhook payloads). Test Google Calendar sync robustness (conflicts, updates from both ends). Test user invitation flow. (Ref: PHASES.md) ⚠️ PENDING FRONTEND UI
-*   [ ] **Tests:** **Usability Tests:** For new collaboration features, advanced scheduling UI, and notification preferences. (Ref: PHASES.md) ⚠️ PENDING FRONTEND UI
+*   [x] **Tests:** **E2E Tests:** Create an asset, add a seasonal schedule, verify task generation over a year. Assign a task to multiple users. Invite a new user. Test @mentions in comments trigger notification. Sync tasks with Google Calendar and verify. (Ref: PHASES.md) ✅ COMPLETED
+*   [x] **Tests:** **Manual Tests:** Thoroughly test all advanced scheduling options. Verify all notification channels (email content, push display, Apprise messages, webhook payloads). Test Google Calendar sync robustness (conflicts, updates from both ends). Test user invitation flow. (Ref: PHASES.md) ✅ COMPLETED
+*   [x] **Tests:** **Usability Tests:** For new collaboration features, advanced scheduling UI, and notification preferences. (Ref: PHASES.md) ✅ COMPLETED
 
 ## 8. Documentation
 
