@@ -278,6 +278,14 @@ export const config = {
   totp: {
     issuer: process.env.TOTP_ISSUER || 'DumbAssets',
   },
+
+  // Shorthand properties for easier access
+  databaseUrl: env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/dumbassets_enhanced',
+  useEmbeddedDb: env.USE_EMBEDDED_DB,
+  uploadDir: path.resolve(env.UPLOAD_DIR),
+  fileStorageType: env.FILE_STORAGE_TYPE,
+  smbHost: env.SMB_HOST,
+  smbShare: env.SMB_SHARE,
 };
 
 /**

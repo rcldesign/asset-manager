@@ -94,6 +94,25 @@ export const queryKeys = {
     list: (filters?: any) => [...queryKeys.assetTemplates.all(), 'list', filters] as const,
     detail: (id: string) => [...queryKeys.assetTemplates.all(), 'detail', id] as const,
   },
+  
+  dashboard: {
+    all: () => [...queryKeys.all, 'dashboard'] as const,
+    overview: (filters?: any) => [...queryKeys.dashboard.all(), 'overview', filters] as const,
+    kpis: (period?: string, compare?: boolean) => [...queryKeys.dashboard.all(), 'kpis', period, compare] as const,
+    taskChart: (filters?: any) => [...queryKeys.dashboard.all(), 'task-chart', filters] as const,
+    assetChart: (type?: string, groupBy?: string) => [...queryKeys.dashboard.all(), 'asset-chart', type, groupBy] as const,
+  },
+  
+  reports: {
+    all: () => [...queryKeys.all, 'reports'] as const,
+    templates: () => [...queryKeys.reports.all(), 'templates'] as const,
+    scheduled: () => [...queryKeys.reports.all(), 'scheduled'] as const,
+    history: () => [...queryKeys.reports.all(), 'history'] as const,
+    assetAge: (filters?: any) => [...queryKeys.reports.all(), 'asset-age', filters] as const,
+    assetWarranty: (filters?: any) => [...queryKeys.reports.all(), 'asset-warranty', filters] as const,
+    taskCompletion: (filters?: any) => [...queryKeys.reports.all(), 'task-completion', filters] as const,
+    userWorkload: (filters?: any) => [...queryKeys.reports.all(), 'user-workload', filters] as const,
+  },
 } as const;
 
 export type QueryKeys = typeof queryKeys;

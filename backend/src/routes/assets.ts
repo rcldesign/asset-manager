@@ -456,6 +456,12 @@ router.put(
       const body = authenticatedReq.body as AssetUpdateBody;
 
       const asset = await assetService.updateAsset(
+        {
+          userId: user.id,
+          requestId: authenticatedReq.headers['x-request-id'] as string,
+          userRole: user.role,
+          organizationId: user.organizationId,
+        },
         assetId,
         {
           ...body,
@@ -860,6 +866,12 @@ router.post(
             case 'updateCategory':
               if (data?.category) {
                 await assetService.updateAsset(
+                  {
+                    userId: user.id,
+                    requestId: authenticatedReq.headers['x-request-id'] as string,
+                    userRole: user.role,
+                    organizationId: user.organizationId,
+                  },
                   assetId,
                   { category: data.category as AssetCategory },
                   user.organizationId,
@@ -869,6 +881,12 @@ router.post(
             case 'move':
               if (data?.locationId) {
                 await assetService.updateAsset(
+                  {
+                    userId: user.id,
+                    requestId: authenticatedReq.headers['x-request-id'] as string,
+                    userRole: user.role,
+                    organizationId: user.organizationId,
+                  },
                   assetId,
                   { locationId: data.locationId as string },
                   user.organizationId,

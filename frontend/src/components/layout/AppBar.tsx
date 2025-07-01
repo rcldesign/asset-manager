@@ -12,12 +12,16 @@ import {
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { OfflineIndicator } from '@/components/PWA/OfflineIndicator';
+import { SyncStatus } from '@/components/PWA/SyncStatus';
+import { InstallPrompt } from '@/components/PWA/InstallPrompt';
 import HomeIcon from '@mui/icons-material/Home';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import CategoryIcon from '@mui/icons-material/Category';
+import AssessmentIcon from '@mui/icons-material/Assessment';
 
 interface NavItem {
   label: string;
@@ -32,6 +36,7 @@ const navItems: NavItem[] = [
   { label: 'Tasks', path: '/tasks', icon: <AssignmentIcon /> },
   { label: 'Schedules', path: '/schedules', icon: <ScheduleIcon /> },
   { label: 'Templates', path: '/asset-templates', icon: <CategoryIcon /> },
+  { label: 'Reports', path: '/reports', icon: <AssessmentIcon /> },
 ];
 
 export const AppBar: React.FC = () => {
@@ -73,6 +78,8 @@ export const AppBar: React.FC = () => {
         </Stack>
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <InstallPrompt />
+          <SyncStatus />
           <NotificationBell />
           <Typography variant="body2">{user.fullName || user.email}</Typography>
           <Button color="inherit" onClick={logout}>

@@ -1,15 +1,45 @@
 'use client';
 
-import { useAuth } from '../../hooks/use-auth';
+import { useState } from 'react';
 import { ProtectedRoute } from '../../components/protected-route';
 import {
   Box,
-  Typography,
-  Card,
-  CardContent,
-  Button,
-  Chip,
+  Tabs,
+  Tab,
+  Paper,
 } from '@mui/material';
+import { 
+  Dashboard as DashboardIcon,
+  Build as AssetIcon,
+  CalendarMonth as CalendarIcon,
+  ViewKanban as KanbanIcon
+} from '@mui/icons-material';
+import OverviewDashboard from './Overview';
+import AssetDashboard from './AssetDashboard';
+import CalendarDashboard from './CalendarDashboard';
+import TaskDashboard from './TaskDashboard';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`dashboard-tabpanel-${index}`}
+      aria-labelledby={`dashboard-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   return (
@@ -20,71 +50,65 @@ export default function DashboardPage() {
 }
 
 function DashboardContent() {
-  const { user, logout, isLogoutLoading } = useAuth();
+  const [activeTab, setActiveTab] = useState(0);
+
+  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+    setActiveTab(newValue);
+  };
 
   return (
     <Box p={3}>
-      <Typography variant="h3" component="h1" gutterBottom>
-        Welcome to DumbAssets Enhanced
-      </Typography>
-      
-      <Card sx={{ mb: 3, maxWidth: 600 }}>
-        <CardContent>
-          <Typography variant="h5" component="h2" gutterBottom>
-            User Information
-          </Typography>
-          
-          {user && (
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>
-                <strong>Name:</strong> {user.fullName}
-              </Typography>
-              <Typography variant="body1" sx={{ mb: 1 }}>
-                <strong>Email:</strong> {user.email}
-              </Typography>
-              <Typography variant="body1" sx={{ mb: 1 }}>
-                <strong>Role:</strong> <Chip label={user.role} color="primary" size="small" />
-              </Typography>
-              <Typography variant="body1" sx={{ mb: 1 }}>
-                <strong>Organization ID:</strong> {user.organizationId}
-              </Typography>
-              <Typography variant="body1" sx={{ mb: 2 }}>
-                <strong>2FA Enabled:</strong> {user.hasEnabledTwoFactor ? '✅ Yes' : '❌ No'}
-              </Typography>
-              
-              <Button
-                variant="outlined"
-                color="error"
-                onClick={logout}
-                disabled={isLogoutLoading}
-              >
-                {isLogoutLoading ? 'Signing out...' : 'Sign Out'}
-              </Button>
-            </Box>
-          )}
-        </CardContent>
-      </Card>
+      <Paper sx={{ mb: 3 }}>
+        <Tabs
+          value={activeTab}
+          onChange={handleTabChange}
+          aria-label="dashboard tabs"
+          variant="scrollable"
+          scrollButtons="auto"
+        >
+          <Tab 
+            icon={<DashboardIcon />} 
+            iconPosition="start" 
+            label="Overview" 
+            id="dashboard-tab-0"
+            aria-controls="dashboard-tabpanel-0"
+          />
+          <Tab 
+            icon={<AssetIcon />} 
+            iconPosition="start" 
+            label="Assets" 
+            id="dashboard-tab-1"
+            aria-controls="dashboard-tabpanel-1"
+          />
+          <Tab 
+            icon={<CalendarIcon />} 
+            iconPosition="start" 
+            label="Calendar" 
+            id="dashboard-tab-2"
+            aria-controls="dashboard-tabpanel-2"
+          />
+          <Tab 
+            icon={<KanbanIcon />} 
+            iconPosition="start" 
+            label="Tasks" 
+            id="dashboard-tab-3"
+            aria-controls="dashboard-tabpanel-3"
+          />
+        </Tabs>
+      </Paper>
 
-      <Card>
-        <CardContent>
-          <Typography variant="h5" component="h2" gutterBottom>
-            Phase 1 Frontend Complete! 🎉
-          </Typography>
-          <Typography variant="body1">
-            This dashboard demonstrates the successful implementation of:
-          </Typography>
-          <ul className="mt-2 ml-4 space-y-1">
-            <li>✅ Next.js frontend with TypeScript</li>
-            <li>✅ Material-UI (MUI) components</li>
-            <li>✅ Zustand state management</li>
-            <li>✅ React Query for API state</li>
-            <li>✅ Authentication flow with JWT</li>
-            <li>✅ Protected routes with role-based access</li>
-            <li>✅ Login/Register pages</li>
-            <li>✅ API proxy to backend</li>
-          </ul>
-        </CardContent>
-      </Card>
+      <TabPanel value={activeTab} index={0}>
+        <OverviewDashboard />
+      </TabPanel>
+      <TabPanel value={activeTab} index={1}>
+        <AssetDashboard />
+      </TabPanel>
+      <TabPanel value={activeTab} index={2}>
+        <CalendarDashboard />
+      </TabPanel>
+      <TabPanel value={activeTab} index={3}>
+        <TaskDashboard />
+      </TabPanel>
     </Box>
   );
 }

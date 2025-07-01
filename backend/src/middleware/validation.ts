@@ -286,4 +286,25 @@ export const rateLimitSchemas = {
   }),
 };
 
+/**
+ * Create validation middleware specifically for query parameters
+ */
+export function validateQuery(schema: ZodSchema) {
+  return validateRequest({ query: schema });
+}
+
+/**
+ * Create validation middleware specifically for request body
+ */
+export function validateBody(schema: ZodSchema) {
+  return validateRequest({ body: schema });
+}
+
+/**
+ * Create validation middleware specifically for request params
+ */
+export function validateParams(schema: ZodSchema) {
+  return validateRequest({ params: schema });
+}
+
 export default validateRequest;

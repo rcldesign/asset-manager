@@ -15,12 +15,19 @@ import {
   InputAdornment,
   FormHelperText,
   Divider,
+  Grid,
+  Card,
+  CardMedia,
+  CardActions,
+  IconButton,
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { AssetFormData, AssetCategory, AssetStatus } from '@/types';
 import { useLocations } from '@/hooks/use-locations';
 import { useAssetTemplates } from '@/hooks/use-asset-templates';
 import { useUsers } from '@/hooks/use-users';
 import { useAssets, useGenerateBarcode } from '@/hooks/use-assets';
+import { CameraCapture } from '@/components/PWA/CameraCapture';
 
 interface AssetFormProps {
   initialData?: Partial<AssetFormData>;
@@ -66,6 +73,7 @@ export const AssetForm: React.FC<AssetFormProps> = ({
   const [tagInput, setTagInput] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [templateFieldsData] = useState<Record<string, unknown>>({});
+  const [attachedPhotos, setAttachedPhotos] = useState<Array<{ url: string; blob: Blob; name: string }>>([]);
 
   const { data: locations } = useLocations();
   const { data: templates } = useAssetTemplates();
@@ -160,6 +168,30 @@ export const AssetForm: React.FC<AssetFormProps> = ({
   //   }));
   // };
 
+  const handlePhotoCapture = (imageBlob: Blob, imageUrl: string) => {
+    const timestamp = new Date().toISOString();
+    const fileName = `asset-photo-${timestamp}.jpg`;
+    
+    setAttachedPhotos(prev => [
+      ...prev,
+      {
+        url: imageUrl,
+        blob: imageBlob,
+        name: fileName,
+      }
+    ]);
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setAttachedPhotos(prev => {
+      const updated = [...prev];
+      // Clean up object URL to prevent memory leaks
+      URL.revokeObjectURL(updated[index].url);
+      updated.splice(index, 1);
+      return updated;
+    });
+  };
+
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
 
@@ -203,6 +235,12 @@ export const AssetForm: React.FC<AssetFormProps> = ({
         notes: formData.notes,
         assignedUserId: formData.assignedUserId,
         parentAssetId: formData.parentAssetId,
+        // Include photo attachments for upload handling
+        attachments: attachedPhotos.map(photo => ({
+          file: photo.blob,
+          name: photo.name,
+          type: 'image',
+        })),
       };
       onSubmit(submitData);
     }
@@ -501,6 +539,61 @@ export const AssetForm: React.FC<AssetFormProps> = ({
             </Box>
           </>
         )}
+
+        <Divider />
+
+        {/* Photo Attachments */}
+        <Box>
+          <Typography variant="h6" gutterBottom>
+            Photo Attachments
+          </Typography>
+          
+          <Stack spacing={2}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <CameraCapture 
+                onCapture={handlePhotoCapture}
+                buttonText="Take Photo"
+                maxSizeMB={5}
+              />
+              <Typography variant="body2" color="text.secondary">
+                Capture photos to attach to this asset
+              </Typography>
+            </Box>
+
+            {attachedPhotos.length > 0 && (
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  Attached Photos ({attachedPhotos.length})
+                </Typography>
+                <Grid container spacing={2}>
+                  {attachedPhotos.map((photo, index) => (
+                    <Grid item xs={6} sm={4} md={3} key={index}>
+                      <Card>
+                        <CardMedia
+                          component="img"
+                          height="120"
+                          image={photo.url}
+                          alt={`Asset photo ${index + 1}`}
+                          sx={{ objectFit: 'cover' }}
+                        />
+                        <CardActions sx={{ justifyContent: 'center', p: 1 }}>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleRemovePhoto(index)}
+                            aria-label="Remove photo"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </CardActions>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Box>
+            )}
+          </Stack>
+        </Box>
 
         {/* Form Actions */}
         <Stack direction="row" spacing={2} justifyContent="flex-end">

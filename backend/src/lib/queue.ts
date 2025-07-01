@@ -111,6 +111,19 @@ export const webhookQueue = new Queue('webhooks', {
   },
 });
 
+export const syncQueue = new Queue('sync', {
+  connection: queueConnection,
+  defaultJobOptions: {
+    removeOnComplete: 10,
+    removeOnFail: 100,
+    attempts: 5,
+    backoff: {
+      type: 'exponential',
+      delay: 2000,
+    },
+  },
+});
+
 // Queue Events for monitoring
 export const emailQueueEvents = new QueueEvents('email', {
   connection: createRedisConnection(),
@@ -136,6 +149,10 @@ const pushNotificationQueueEvents = new QueueEvents('push-notifications', {
 });
 
 export const webhookQueueEvents = new QueueEvents('webhooks', {
+  connection: createRedisConnection(),
+});
+
+export const syncQueueEvents = new QueueEvents('sync', {
   connection: createRedisConnection(),
 });
 
@@ -227,6 +244,15 @@ export interface WebhookJob {
   };
 }
 
+export interface SyncJob {
+  type: 'batch-sync' | 'critical-sync' | 'type-sync' | 'custom-sync' | 'retry-sync';
+  clientId: string;
+  itemIds?: string[];
+  entityType?: string;
+  tag?: string;
+  priority?: number;
+}
+
 // Queue helper functions
 export async function addEmailJob(
   data: EmailJob,
@@ -304,6 +330,16 @@ export async function addWebhookJob(
   });
 }
 
+export async function addSyncJob(
+  data: SyncJob,
+  options?: { delay?: number; priority?: number },
+): Promise<Job> {
+  return syncQueue.add('process-sync', data, {
+    delay: options?.delay,
+    priority: options?.priority || data.priority,
+  });
+}
+
 // Queue event handlers for logging
 const allQueueEvents = [
   emailQueueEvents,
@@ -314,6 +350,7 @@ const allQueueEvents = [
   activityQueueEvents,
   pushNotificationQueueEvents,
   webhookQueueEvents,
+  syncQueueEvents,
 ];
 
 allQueueEvents.forEach((queueEvents, index) => {
@@ -326,6 +363,7 @@ allQueueEvents.forEach((queueEvents, index) => {
     'activities',
     'push-notifications',
     'webhooks',
+    'sync',
   ];
   const queueName = queueNames[index];
 
@@ -371,6 +409,7 @@ export async function getQueueHealth(): Promise<{
     { name: 'activities', queue: activityQueue },
     { name: 'push-notifications', queue: pushNotificationQueue },
     { name: 'webhooks', queue: webhookQueue },
+    { name: 'sync', queue: syncQueue },
   ];
 
   const queueStats = await Promise.all(
@@ -408,6 +447,7 @@ export async function pauseAllQueues(): Promise<void> {
     activityQueue.pause(),
     pushNotificationQueue.pause(),
     webhookQueue.pause(),
+    syncQueue.pause(),
   ]);
   logger.info('All queues paused');
 }
@@ -422,6 +462,7 @@ export async function resumeAllQueues(): Promise<void> {
     activityQueue.resume(),
     pushNotificationQueue.resume(),
     webhookQueue.resume(),
+    syncQueue.resume(),
   ]);
   logger.info('All queues resumed');
 }
@@ -439,6 +480,7 @@ export async function closeQueues(): Promise<void> {
     activityQueue.close(),
     pushNotificationQueue.close(),
     webhookQueue.close(),
+    syncQueue.close(),
     emailQueueEvents.close(),
     notificationQueueEvents.close(),
     maintenanceQueueEvents.close(),
@@ -447,6 +489,7 @@ export async function closeQueues(): Promise<void> {
     activityQueueEvents.close(),
     pushNotificationQueueEvents.close(),
     webhookQueueEvents.close(),
+    syncQueueEvents.close(),
   ]);
 
   await queueConnection.quit();

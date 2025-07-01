@@ -3,7 +3,13 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 import { addWebhookJob } from '../lib/queue';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, Organization, User } from '@prisma/client';
+import type { 
+  WebhookEventPayloadMap, 
+  EnhancedWebhookEvent,
+  WebhookUser,
+  WebhookOrganization 
+} from '../types/webhook-payloads';
 
 export interface WebhookEvent {
   id: string;
@@ -34,7 +40,15 @@ export type WebhookEventType =
   | 'maintenance.started'
   | 'maintenance.completed'
   | 'warranty.expiring'
-  | 'warranty.expired';
+  | 'warranty.expired'
+  | 'audit.created'
+  | 'report.generated'
+  | 'report.scheduled'
+  | 'backup.created'
+  | 'backup.restored'
+  | 'sync.completed'
+  | 'gdpr.export_requested'
+  | 'gdpr.deletion_requested';
 
 export interface WebhookConfig {
   id: string;
@@ -231,14 +245,66 @@ export class WebhookService {
   }
 
   /**
-   * Emit a webhook event
+   * Create an enhanced webhook event with full context
    */
-  public async emitEvent(event: WebhookEvent): Promise<void> {
+  public async createEnhancedEvent<T extends WebhookEventType>(
+    type: T,
+    organizationId: string,
+    userId: string,
+    payload: WebhookEventPayloadMap[T]
+  ): Promise<EnhancedWebhookEvent<WebhookEventPayloadMap[T]>> {
+    // Fetch organization and user details
+    const [organization, user] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { id: true, name: true }
+      }),
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, name: true, role: true }
+      })
+    ]);
+
+    if (!organization || !user) {
+      throw new Error('Organization or user not found for webhook event');
+    }
+
+    const webhookUser: WebhookUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role
+    };
+
+    const webhookOrg: WebhookOrganization = {
+      id: organization.id,
+      name: organization.name
+    };
+
+    return {
+      id: `${type}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+      type,
+      organizationId,
+      organization: webhookOrg,
+      timestamp: new Date(),
+      triggeredBy: webhookUser,
+      data: payload,
+      metadata: {
+        version: '2.0', // Indicates enhanced payload format
+        source: 'asset-manager-backend'
+      }
+    };
+  }
+
+  /**
+   * Emit a webhook event (supports both legacy and enhanced formats)
+   */
+  public async emitEvent(event: WebhookEvent | EnhancedWebhookEvent): Promise<void> {
     try {
       // Find all active webhooks for this organization that subscribe to this event type
       const webhooks = await this.getWebhooks(event.organizationId, {
         isActive: true,
-        eventType: event.type,
+        eventType: event.type as WebhookEventType,
       });
 
       if (webhooks.length === 0) {
@@ -253,7 +319,7 @@ export class WebhookService {
       for (const webhook of webhooks) {
         await addWebhookJob({
           webhookId: webhook.id,
-          event,
+          event: event as WebhookEvent, // Type assertion for compatibility
         });
       }
 
@@ -300,13 +366,25 @@ export class WebhookService {
     });
 
     try {
-      // Prepare payload
-      const payload = {
+      // Prepare payload - check if it's an enhanced event
+      const isEnhancedEvent = 'organization' in event && 'triggeredBy' in event;
+      
+      const payload = isEnhancedEvent ? {
+        id: event.id,
+        type: event.type,
+        timestamp: event.timestamp.toISOString(),
+        organization: (event as EnhancedWebhookEvent).organization,
+        triggeredBy: (event as EnhancedWebhookEvent).triggeredBy,
+        data: event.data,
+        metadata: event.metadata || {},
+      } : {
         id: event.id,
         type: event.type,
         timestamp: event.timestamp.toISOString(),
         data: event.data,
         metadata: event.metadata || {},
+        // For backward compatibility, add organizationId if not enhanced
+        organizationId: event.organizationId
       };
 
       // Prepare headers

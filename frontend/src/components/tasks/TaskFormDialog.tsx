@@ -19,7 +19,14 @@ import {
   Typography,
   Alert,
   SelectChangeEvent,
+  Divider,
+  Grid,
+  Card,
+  CardMedia,
+  CardActions,
+  IconButton,
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -27,6 +34,7 @@ import { TaskPriority, TaskFormData } from '@/types';
 import { useCreateTask, useUpdateTask } from '@/hooks/use-tasks';
 import { useAssets } from '@/hooks/use-assets';
 import { useUsers } from '@/hooks/use-users';
+import { CameraCapture } from '@/components/PWA/CameraCapture';
 
 const taskFormSchema = z.object({
   title: z.string().min(1, 'Task title is required'),
@@ -74,6 +82,7 @@ export const TaskFormDialog: React.FC<TaskFormDialogProps> = ({
   isFullPage = false,
 }) => {
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [attachedPhotos, setAttachedPhotos] = useState<Array<{ url: string; blob: Blob; name: string }>>([]);
 
   const createTaskMutation = useCreateTask();
   const updateTaskMutation = useUpdateTask();
@@ -127,6 +136,30 @@ export const TaskFormDialog: React.FC<TaskFormDialogProps> = ({
     }
   }, [task, reset]);
 
+  const handlePhotoCapture = (imageBlob: Blob, imageUrl: string) => {
+    const timestamp = new Date().toISOString();
+    const fileName = `task-photo-${timestamp}.jpg`;
+    
+    setAttachedPhotos(prev => [
+      ...prev,
+      {
+        url: imageUrl,
+        blob: imageBlob,
+        name: fileName,
+      }
+    ]);
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setAttachedPhotos(prev => {
+      const updated = [...prev];
+      // Clean up object URL to prevent memory leaks
+      URL.revokeObjectURL(updated[index].url);
+      updated.splice(index, 1);
+      return updated;
+    });
+  };
+
   const onSubmit = async (data: TaskFormValues) => {
     try {
       setSubmitError(null);
@@ -141,6 +174,12 @@ export const TaskFormDialog: React.FC<TaskFormDialogProps> = ({
         estimatedDuration: data.estimatedHours || undefined,
         notes: data.notes || undefined,
         isAutomated: false, // Manual tasks are not automated
+        // Include photo attachments for upload handling
+        attachments: attachedPhotos.map(photo => ({
+          file: photo.blob,
+          name: photo.name,
+          type: 'image',
+        })),
       };
 
       if (isEditing && task) {
@@ -319,6 +358,61 @@ export const TaskFormDialog: React.FC<TaskFormDialogProps> = ({
             />
           )}
         />
+
+        <Divider />
+
+        {/* Photo Attachments */}
+        <Box>
+          <Typography variant="h6" gutterBottom>
+            Photo Attachments
+          </Typography>
+          
+          <Stack spacing={2}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <CameraCapture 
+                onCapture={handlePhotoCapture}
+                buttonText="Take Photo"
+                maxSizeMB={5}
+              />
+              <Typography variant="body2" color="text.secondary">
+                Capture photos related to this task
+              </Typography>
+            </Box>
+
+            {attachedPhotos.length > 0 && (
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  Attached Photos ({attachedPhotos.length})
+                </Typography>
+                <Grid container spacing={2}>
+                  {attachedPhotos.map((photo, index) => (
+                    <Grid item xs={6} sm={4} md={3} key={index}>
+                      <Card>
+                        <CardMedia
+                          component="img"
+                          height="120"
+                          image={photo.url}
+                          alt={`Task photo ${index + 1}`}
+                          sx={{ objectFit: 'cover' }}
+                        />
+                        <CardActions sx={{ justifyContent: 'center', p: 1 }}>
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleRemovePhoto(index)}
+                            aria-label="Remove photo"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </CardActions>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              </Box>
+            )}
+          </Stack>
+        </Box>
 
         {!isFullPage && (
           <Stack direction="row" spacing={2} justifyContent="flex-end">

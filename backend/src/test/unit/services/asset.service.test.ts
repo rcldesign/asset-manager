@@ -5,6 +5,8 @@ import type { LocationService } from '../../../services/location.service';
 import { AppError, NotFoundError, ConflictError } from '../../../utils/errors';
 import { AssetCategory, AssetStatus, Prisma } from '@prisma/client';
 import { prismaMock } from '../../prisma-singleton';
+import type { IRequestContext } from '../../../interfaces/context.interface';
+import { UserRole } from '../../../lib/permissions';
 
 // Mock the dependencies
 jest.mock('../../../services/asset-template.service');
@@ -17,6 +19,13 @@ describe('AssetService', () => {
 
   const mockOrganizationId = 'org-123';
   const mockAssetId = 'asset-123';
+  
+  const mockContext: IRequestContext = {
+    userId: 'user-123',
+    userRole: UserRole.MEMBER,
+    organizationId: mockOrganizationId,
+    requestId: 'req-123'
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -315,7 +324,7 @@ describe('AssetService', () => {
       prismaMock.asset.findFirst.mockResolvedValue(mockAsset as any);
       prismaMock.asset.update.mockResolvedValue(updatedAsset as any);
 
-      const result = await assetService.updateAsset(mockAssetId, updateData, mockOrganizationId);
+      const result = await assetService.updateAsset(mockContext, mockAssetId, updateData, mockOrganizationId);
 
       expect(result.name).toBe('Updated Asset');
       expect(result.description).toBe('Updated description');
@@ -344,6 +353,7 @@ describe('AssetService', () => {
       } as any);
 
       const result = await assetService.updateAsset(
+        mockContext,
         mockAssetId,
         { assetTemplateId: newTemplateId },
         mockOrganizationId,
@@ -375,6 +385,7 @@ describe('AssetService', () => {
       } as any);
 
       const result = await assetService.updateAsset(
+        mockContext,
         mockAssetId,
         { parentId: newParentId },
         mockOrganizationId,
@@ -397,7 +408,7 @@ describe('AssetService', () => {
         .mockResolvedValueOnce(mockChild as any); // New parent (child) lookup
 
       await expect(
-        assetService.updateAsset(mockAssetId, { parentId: childId }, mockOrganizationId),
+        assetService.updateAsset(mockContext, mockAssetId, { parentId: childId }, mockOrganizationId),
       ).rejects.toThrow(ConflictError);
     });
 
@@ -409,7 +420,7 @@ describe('AssetService', () => {
         .mockResolvedValueOnce({ id: 'other-asset' } as any); // QR code conflict
 
       await expect(
-        assetService.updateAsset(mockAssetId, { qrCode: newQrCode }, mockOrganizationId),
+        assetService.updateAsset(mockContext, mockAssetId, { qrCode: newQrCode }, mockOrganizationId),
       ).rejects.toThrow(ConflictError);
     });
 
@@ -417,7 +428,7 @@ describe('AssetService', () => {
       prismaMock.asset.findFirst.mockResolvedValue(null);
 
       await expect(
-        assetService.updateAsset(mockAssetId, { name: 'New Name' }, mockOrganizationId),
+        assetService.updateAsset(mockContext, mockAssetId, { name: 'New Name' }, mockOrganizationId),
       ).rejects.toThrow(NotFoundError);
     });
   });

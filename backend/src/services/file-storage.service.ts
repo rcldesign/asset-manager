@@ -496,4 +496,81 @@ export class FileStorageService {
         return config.upload.maxFileSize;
     }
   }
+
+  /**
+   * Upload a report file.
+   * This method handles file uploads from generated reports.
+   *
+   * @param {string} filePath - Path to the report file
+   * @param {object} metadata - Report metadata
+   * @returns {Promise<FileMetadata>} Metadata of uploaded file
+   * @throws {Error} If file reading or upload fails
+   */
+  async uploadReportFile(
+    filePath: string,
+    metadata: {
+      reportType: string;
+      format: string;
+      userId: string;
+      organizationId: string;
+    },
+  ): Promise<FileMetadata> {
+    try {
+      // Read the file from disk
+      const fileBuffer = await fs.readFile(filePath);
+      const stats = await fs.stat(filePath);
+      const filename = path.basename(filePath);
+
+      // Determine MIME type based on format
+      let mimeType = 'application/octet-stream';
+      switch (metadata.format.toLowerCase()) {
+        case 'pdf':
+          mimeType = 'application/pdf';
+          break;
+        case 'csv':
+          mimeType = 'text/csv';
+          break;
+        case 'xlsx':
+          mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          break;
+      }
+
+      // Create a mock Multer file object
+      const file: Express.Multer.File = {
+        fieldname: 'report',
+        originalname: filename,
+        encoding: '7bit',
+        mimetype: mimeType,
+        buffer: fileBuffer,
+        size: stats.size,
+        destination: '',
+        filename: '',
+        path: '',
+        stream: null as any,
+      };
+
+      // Upload using the standard upload method
+      const uploadedFile = await this.uploadFile(file, {
+        allowedMimeTypes: [mimeType],
+        maxSizeBytes: 100 * 1024 * 1024, // 100MB for reports
+        preserveOriginalName: true,
+      });
+
+      logger.info('Report file uploaded successfully', {
+        fileId: uploadedFile.id,
+        reportType: metadata.reportType,
+        format: metadata.format,
+        userId: metadata.userId,
+        organizationId: metadata.organizationId,
+      });
+
+      return uploadedFile;
+    } catch (error) {
+      logger.error('Failed to upload report file', error as Error, {
+        filePath,
+        metadata,
+      });
+      throw error;
+    }
+  }
 }

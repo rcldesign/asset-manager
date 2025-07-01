@@ -13,15 +13,19 @@ import {
   InputAdornment,
   SelectChangeEvent,
   Autocomplete,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import { AssetFilters, AssetStatus, AssetCategory } from '@/types';
 import { useDebounce } from '@/hooks/use-debounce';
 import { useLocations } from '@/hooks/use-locations';
 import { useAssetTemplates } from '@/hooks/use-asset-templates';
+import { BarcodeScanner } from '@/components/PWA/BarcodeScanner';
 
 interface AssetFiltersComponentProps {
   filters: AssetFilters;
@@ -98,6 +102,12 @@ export const AssetFiltersComponent: React.FC<AssetFiltersComponentProps> = ({
     });
   };
 
+  const handleBarcodeScanned = (barcode: string) => {
+    // When a barcode is scanned, set it as the search term
+    setSearch(barcode);
+    onFilterChange({ search: barcode });
+  };
+
   const activeFiltersCount = [
     filters.status,
     filters.category,
@@ -118,13 +128,31 @@ export const AssetFiltersComponent: React.FC<AssetFiltersComponentProps> = ({
             <TextField
               fullWidth
               size="small"
-              placeholder="Search assets..."
+              placeholder="Search assets or scan barcode..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
                     <SearchIcon />
+                  </InputAdornment>
+                ),
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <BarcodeScanner
+                      onScan={handleBarcodeScanned}
+                      customTrigger={
+                        <Tooltip title="Scan Barcode">
+                          <IconButton 
+                            size="small" 
+                            edge="end"
+                            aria-label="scan barcode"
+                          >
+                            <QrCodeScannerIcon />
+                          </IconButton>
+                        </Tooltip>
+                      }
+                    />
                   </InputAdornment>
                 ),
               }}

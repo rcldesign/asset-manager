@@ -19,7 +19,10 @@ export type Resource =
   | 'location'
   | 'asset-template'
   | 'schedule'
-  | 'notification';
+  | 'notification'
+  | 'audit'
+  | 'dashboard'
+  | 'backup';
 
 export type Action = 'create' | 'read' | 'update' | 'delete' | 'manage'; // Special action that includes all CRUD operations
 
@@ -98,6 +101,7 @@ export class PermissionManager {
       { permission: 'read:asset-template:any' },
       { permission: 'read:schedule:any' },
       { permission: 'read:notification:own' },
+      { permission: 'read:dashboard:any' }, // Viewers can see dashboard
     ]);
 
     // MEMBER permissions - can manage own resources and create new ones
@@ -145,6 +149,7 @@ export class PermissionManager {
       { permission: 'delete:schedule:any' },
       { permission: 'read:notification:any' },
       { permission: 'create:notification:any' },
+      { permission: 'read:audit:any' }, // Managers can view audit trail
     ]);
 
     // OWNER permissions - full access to all resources
@@ -163,6 +168,9 @@ export class PermissionManager {
       { permission: 'manage:asset-template:any' },
       { permission: 'manage:schedule:any' },
       { permission: 'manage:notification:any' },
+      { permission: 'manage:audit:any' }, // Owners have full audit access
+      { permission: 'manage:dashboard:any' }, // Owners have full dashboard access
+      { permission: 'manage:backup:any' }, // Owners have full backup access
     ]);
   }
 

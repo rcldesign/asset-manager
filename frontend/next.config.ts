@@ -28,8 +28,47 @@ const config = withPWA({
   reloadOnOnline: true,
   cacheOnFrontEndNav: true,
   aggressiveFrontEndNavCaching: true,
+  swSrc: 'public/sw-enhanced.js', // Use our custom service worker
   workboxOptions: {
     disableDevLogs: true,
+    mode: 'production',
+    // Additional Workbox configuration
+    runtimeCaching: [
+      {
+        urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'google-fonts',
+          expiration: {
+            maxEntries: 4,
+            maxAgeSeconds: 365 * 24 * 60 * 60, // 1 year
+          },
+        },
+      },
+      {
+        urlPattern: /\.(?:jpg|jpeg|png|gif|bmp|webp|svg|ico)$/i,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'images',
+          expiration: {
+            maxEntries: 100,
+            maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+          },
+        },
+      },
+      {
+        urlPattern: /\/api\/.*/i,
+        handler: 'NetworkFirst',
+        options: {
+          cacheName: 'api-cache',
+          expiration: {
+            maxEntries: 50,
+            maxAgeSeconds: 5 * 60, // 5 minutes
+          },
+          networkTimeoutSeconds: 10,
+        },
+      },
+    ],
   },
 })(nextConfig);
 

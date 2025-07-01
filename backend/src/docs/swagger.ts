@@ -70,6 +70,39 @@ const swaggerDefinition = {
         enum: ['OPERATIONAL', 'MAINTENANCE', 'REPAIR', 'RETIRED', 'DISPOSED', 'LOST'],
         description: 'Asset operational status',
       },
+      WebhookEventType: {
+        type: 'string',
+        enum: [
+          'asset.created',
+          'asset.updated',
+          'asset.deleted',
+          'task.created',
+          'task.updated',
+          'task.completed',
+          'task.deleted',
+          'task.assigned',
+          'task.overdue',
+          'schedule.created',
+          'schedule.updated',
+          'schedule.deleted',
+          'user.invited',
+          'user.joined',
+          'user.deactivated',
+          'maintenance.started',
+          'maintenance.completed',
+          'warranty.expiring',
+          'warranty.expired',
+          'audit.created',
+          'report.generated',
+          'report.scheduled',
+          'backup.created',
+          'backup.restored',
+          'sync.completed',
+          'gdpr.export_requested',
+          'gdpr.deletion_requested'
+        ],
+        description: 'Webhook event types that can be subscribed to',
+      },
       // Error schemas
       Error: {
         type: 'object',
@@ -942,6 +975,73 @@ const swaggerDefinition = {
           'createdAt',
         ],
       },
+      BackupMetadata: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Backup unique identifier',
+          },
+          timestamp: {
+            type: 'string',
+            format: 'date-time',
+            description: 'When the backup was created',
+          },
+          createdBy: {
+            type: 'string',
+            description: 'Email of user who created the backup',
+          },
+          type: {
+            type: 'string',
+            enum: ['full', 'database', 'files'],
+            description: 'Type of backup',
+          },
+          size: {
+            type: 'integer',
+            description: 'Size of backup in bytes',
+          },
+          checksum: {
+            type: 'string',
+            description: 'SHA256 checksum of backup file',
+          },
+          databaseType: {
+            type: 'string',
+            enum: ['embedded', 'external'],
+            description: 'Type of database backed up',
+          },
+          fileStorageType: {
+            type: 'string',
+            enum: ['local', 'smb'],
+            description: 'Type of file storage backed up',
+          },
+          includesDatabase: {
+            type: 'boolean',
+            description: 'Whether database is included in backup',
+          },
+          includesFiles: {
+            type: 'boolean',
+            description: 'Whether files are included in backup',
+          },
+          description: {
+            type: 'string',
+            nullable: true,
+            description: 'Optional backup description',
+          },
+        },
+        required: [
+          'id',
+          'timestamp',
+          'createdBy',
+          'type',
+          'size',
+          'checksum',
+          'databaseType',
+          'fileStorageType',
+          'includesDatabase',
+          'includesFiles',
+        ],
+      },
       AssetAttachment: {
         type: 'object',
         properties: {
@@ -1644,6 +1744,548 @@ const swaggerDefinition = {
         },
         required: ['id', 'filename', 'size', 'mimeType', 'url'],
       },
+      // Audit Trail schemas
+      AuditTrail: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Audit trail entry unique identifier',
+          },
+          model: {
+            type: 'string',
+            description: 'Model/entity type that was modified',
+          },
+          recordId: {
+            type: 'string',
+            description: 'ID of the record that was modified',
+          },
+          action: {
+            type: 'string',
+            enum: ['CREATE', 'UPDATE', 'DELETE', 'UPDATE_MANY', 'DELETE_MANY'],
+            description: 'Action performed on the record',
+          },
+          oldValue: {
+            type: 'object',
+            nullable: true,
+            description: 'Previous value before modification',
+            additionalProperties: true,
+          },
+          newValue: {
+            type: 'object',
+            nullable: true,
+            description: 'New value after modification',
+            additionalProperties: true,
+          },
+          userId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'User ID who performed the action',
+          },
+          user: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                format: 'uuid',
+              },
+              email: {
+                type: 'string',
+                format: 'email',
+              },
+              fullName: {
+                type: 'string',
+                nullable: true,
+              },
+            },
+            description: 'User details',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Timestamp when the action was performed',
+          },
+        },
+        required: ['id', 'model', 'recordId', 'action', 'userId', 'createdAt'],
+      },
+      AuditTrailQuery: {
+        type: 'object',
+        properties: {
+          model: {
+            type: 'string',
+            description: 'Filter by model/entity type',
+          },
+          recordId: {
+            type: 'string',
+            description: 'Filter by specific record ID',
+          },
+          userId: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Filter by user who performed actions',
+          },
+          action: {
+            type: 'string',
+            enum: ['CREATE', 'UPDATE', 'DELETE', 'UPDATE_MANY', 'DELETE_MANY'],
+            description: 'Filter by action type',
+          },
+          fromDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Filter entries from this date',
+          },
+          toDate: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Filter entries up to this date',
+          },
+          page: {
+            type: 'integer',
+            minimum: 1,
+            default: 1,
+            description: 'Page number',
+          },
+          limit: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 100,
+            default: 50,
+            description: 'Items per page',
+          },
+        },
+      },
+      // Dashboard schemas
+      DashboardStats: {
+        type: 'object',
+        properties: {
+          assets: {
+            type: 'object',
+            properties: {
+              total: {
+                type: 'integer',
+                description: 'Total number of assets',
+              },
+              byStatus: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'integer',
+                },
+                description: 'Asset count by status',
+              },
+              byCategory: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'integer',
+                },
+                description: 'Asset count by category',
+              },
+              recentlyAdded: {
+                type: 'integer',
+                description: 'Assets added in last 30 days',
+              },
+              warrantyExpiringSoon: {
+                type: 'integer',
+                description: 'Assets with warranty expiring in next 90 days',
+              },
+              totalValue: {
+                type: 'number',
+                description: 'Total purchase value of all assets',
+              },
+            },
+          },
+          tasks: {
+            type: 'object',
+            properties: {
+              total: {
+                type: 'integer',
+                description: 'Total number of tasks',
+              },
+              byStatus: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'integer',
+                },
+                description: 'Task count by status',
+              },
+              byPriority: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'integer',
+                },
+                description: 'Task count by priority',
+              },
+              overdue: {
+                type: 'integer',
+                description: 'Number of overdue tasks',
+              },
+              dueToday: {
+                type: 'integer',
+                description: 'Tasks due today',
+              },
+              dueThisWeek: {
+                type: 'integer',
+                description: 'Tasks due this week',
+              },
+              completionRate: {
+                type: 'number',
+                description: 'Task completion rate percentage',
+              },
+            },
+          },
+          schedules: {
+            type: 'object',
+            properties: {
+              total: {
+                type: 'integer',
+                description: 'Total number of schedules',
+              },
+              active: {
+                type: 'integer',
+                description: 'Number of active schedules',
+              },
+              nextWeek: {
+                type: 'integer',
+                description: 'Schedules with tasks due next week',
+              },
+            },
+          },
+          users: {
+            type: 'object',
+            properties: {
+              total: {
+                type: 'integer',
+                description: 'Total number of users',
+              },
+              active: {
+                type: 'integer',
+                description: 'Active users in last 30 days',
+              },
+              byRole: {
+                type: 'object',
+                additionalProperties: {
+                  type: 'integer',
+                },
+                description: 'User count by role',
+              },
+            },
+          },
+          lastUpdated: {
+            type: 'string',
+            format: 'date-time',
+            description: 'When the dashboard data was last updated',
+          },
+        },
+        required: ['assets', 'tasks', 'schedules', 'users', 'lastUpdated'],
+      },
+      // Report schemas
+      ReportDefinition: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            format: 'uuid',
+            description: 'Report definition ID',
+          },
+          name: {
+            type: 'string',
+            description: 'Report name',
+          },
+          description: {
+            type: 'string',
+            nullable: true,
+            description: 'Report description',
+          },
+          type: {
+            type: 'string',
+            enum: ['asset', 'task', 'schedule', 'maintenance', 'financial', 'custom'],
+            description: 'Report type',
+          },
+          filters: {
+            type: 'object',
+            description: 'Report filters configuration',
+            additionalProperties: true,
+          },
+          columns: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                field: {
+                  type: 'string',
+                  description: 'Field name',
+                },
+                label: {
+                  type: 'string',
+                  description: 'Display label',
+                },
+                type: {
+                  type: 'string',
+                  enum: ['string', 'number', 'date', 'boolean'],
+                  description: 'Column data type',
+                },
+                format: {
+                  type: 'string',
+                  nullable: true,
+                  description: 'Display format',
+                },
+              },
+            },
+            description: 'Report columns configuration',
+          },
+          groupBy: {
+            type: 'array',
+            items: {
+              type: 'string',
+            },
+            description: 'Fields to group by',
+          },
+          sortBy: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                field: {
+                  type: 'string',
+                },
+                direction: {
+                  type: 'string',
+                  enum: ['asc', 'desc'],
+                },
+              },
+            },
+            description: 'Sort configuration',
+          },
+          isPublic: {
+            type: 'boolean',
+            description: 'Whether the report is public',
+          },
+          createdBy: {
+            type: 'string',
+            format: 'uuid',
+            description: 'User ID who created the report',
+          },
+          createdAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Report creation timestamp',
+          },
+          updatedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Report last update timestamp',
+          },
+        },
+        required: ['id', 'name', 'type', 'filters', 'columns', 'isPublic', 'createdBy', 'createdAt', 'updatedAt'],
+      },
+      // GDPR schemas
+      GDPRDataExport: {
+        type: 'object',
+        properties: {
+          userData: {
+            type: 'object',
+            description: 'User personal data',
+            additionalProperties: true,
+          },
+          assets: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/Asset',
+            },
+            description: 'Assets created by user',
+          },
+          tasks: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/Task',
+            },
+            description: 'Tasks assigned to or created by user',
+          },
+          auditTrail: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/AuditTrail',
+            },
+            description: 'User activity audit trail',
+          },
+          notifications: {
+            type: 'array',
+            items: {
+              $ref: '#/components/schemas/Notification',
+            },
+            description: 'User notifications',
+          },
+          exportedAt: {
+            type: 'string',
+            format: 'date-time',
+            description: 'When the data was exported',
+          },
+        },
+        required: ['userData', 'assets', 'tasks', 'auditTrail', 'notifications', 'exportedAt'],
+      },
+      GDPRDataDeletionRequest: {
+        type: 'object',
+        properties: {
+          confirmation: {
+            type: 'string',
+            description: 'Confirmation text (must be "DELETE MY DATA")',
+          },
+          retainAuditTrail: {
+            type: 'boolean',
+            default: true,
+            description: 'Whether to retain audit trail for compliance',
+          },
+        },
+        required: ['confirmation'],
+      },
+      // PWA Sync schemas
+      SyncStatus: {
+        type: 'object',
+        properties: {
+          lastSyncTime: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'Last successful sync timestamp',
+          },
+          pendingChanges: {
+            type: 'integer',
+            description: 'Number of pending local changes',
+          },
+          syncInProgress: {
+            type: 'boolean',
+            description: 'Whether sync is currently in progress',
+          },
+          conflicts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                entity: {
+                  type: 'string',
+                  description: 'Entity type',
+                },
+                id: {
+                  type: 'string',
+                  description: 'Entity ID',
+                },
+                localVersion: {
+                  type: 'object',
+                  additionalProperties: true,
+                },
+                serverVersion: {
+                  type: 'object',
+                  additionalProperties: true,
+                },
+              },
+            },
+            description: 'Sync conflicts requiring resolution',
+          },
+        },
+        required: ['pendingChanges', 'syncInProgress', 'conflicts'],
+      },
+      SyncRequest: {
+        type: 'object',
+        properties: {
+          entities: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['assets', 'tasks', 'schedules', 'locations', 'notifications'],
+            },
+            description: 'Entities to sync',
+          },
+          lastSyncTime: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            description: 'Last sync timestamp for delta sync',
+          },
+          changes: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                entity: {
+                  type: 'string',
+                  description: 'Entity type',
+                },
+                id: {
+                  type: 'string',
+                  description: 'Entity ID',
+                },
+                action: {
+                  type: 'string',
+                  enum: ['create', 'update', 'delete'],
+                  description: 'Change action',
+                },
+                data: {
+                  type: 'object',
+                  additionalProperties: true,
+                  description: 'Entity data',
+                },
+                timestamp: {
+                  type: 'string',
+                  format: 'date-time',
+                  description: 'When the change was made',
+                },
+              },
+            },
+            description: 'Local changes to push',
+          },
+        },
+        required: ['entities'],
+      },
+      SyncResponse: {
+        type: 'object',
+        properties: {
+          serverTime: {
+            type: 'string',
+            format: 'date-time',
+            description: 'Current server timestamp',
+          },
+          changes: {
+            type: 'object',
+            additionalProperties: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: true,
+              },
+            },
+            description: 'Server changes by entity type',
+          },
+          deletions: {
+            type: 'object',
+            additionalProperties: {
+              type: 'array',
+              items: {
+                type: 'string',
+              },
+            },
+            description: 'Deleted entity IDs by type',
+          },
+          conflicts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                entity: {
+                  type: 'string',
+                },
+                id: {
+                  type: 'string',
+                },
+                reason: {
+                  type: 'string',
+                },
+              },
+            },
+            description: 'Conflicts that need resolution',
+          },
+        },
+        required: ['serverTime', 'changes', 'deletions', 'conflicts'],
+      },
     },
   },
   tags: [
@@ -1688,12 +2330,48 @@ const swaggerDefinition = {
       description: 'Notification management endpoints',
     },
     {
+      name: 'Backup',
+      description: 'Backup and restore operations',
+    },
+    {
       name: 'OIDC',
       description: 'OpenID Connect authentication endpoints',
     },
     {
       name: 'Health',
       description: 'Application health and status endpoints',
+    },
+    {
+      name: 'Dashboard',
+      description: 'Dashboard aggregation and analytics endpoints',
+    },
+    {
+      name: 'Reports',
+      description: 'Reporting and custom report builder endpoints',
+    },
+    {
+      name: 'GDPR',
+      description: 'GDPR compliance and data management endpoints',
+    },
+    {
+      name: 'PWA Sync',
+      description: 'Progressive Web App synchronization endpoints',
+    },
+    {
+      name: 'Audit Trail',
+      description: 'Audit trail querying and management endpoints',
+    },
+    {
+      name: 'Activity Streams',
+      description: 'Activity stream endpoints for real-time updates',
+    },
+    {
+      name: 'Calendar Integration',
+      description: 'Calendar integration and sync endpoints',
+    },
+    {
+      name: 'Collaboration',
+      description: 'Team collaboration and sharing endpoints',
     },
   ],
 };

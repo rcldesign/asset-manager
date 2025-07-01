@@ -33,6 +33,14 @@ import emailWebhookRoutes from './routes/email-webhooks';
 import pushNotificationRoutes from './routes/push-notifications';
 import appriseRoutes from './routes/apprise';
 import webhookRoutes from './routes/webhooks';
+import auditTrailRoutes from './routes/audit-trail';
+import dashboardRoutes from './routes/dashboard';
+import reportsRoutes from './routes/reports';
+import gdprRoutes from './routes/gdpr-compliance';
+import pwaSyncRoutes from './routes/pwa-sync';
+import dataExportRoutes from './routes/data-export';
+import dataImportRoutes from './routes/data-import';
+import backupRoutes from './routes/backup';
 import {
   securityHeaders,
   generalRateLimit,
@@ -187,6 +195,14 @@ app.use('/api/webhooks/email', emailWebhookRoutes);
 app.use('/api/push', pushNotificationRoutes);
 app.use('/api/apprise', appriseRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/audit-trail', auditTrailRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/reports', reportsRoutes);
+app.use('/api/gdpr', gdprRoutes);
+app.use('/api/pwa-sync', pwaSyncRoutes);
+app.use('/api/export', dataExportRoutes);
+app.use('/api/import', dataImportRoutes);
+app.use('/api/backup', backupRoutes);
 
 // 404 handler - creates error and passes to error handler
 app.use((req, _res, next) => {

@@ -8,6 +8,13 @@ import { LocationService } from './location.service';
 import { ActivityStreamService } from './activity-stream.service';
 import { ActivityVerbs, ActivityObjectTypes, ActivityTargetTypes } from '../types/activity';
 import { webhookService } from './webhook.service';
+import { AuditService } from './audit.service';
+import { IRequestContext } from '../interfaces/context.interface';
+import type { 
+  AssetCreatedPayload, 
+  AssetUpdatedPayload, 
+  AssetDeletedPayload 
+} from '../types/webhook-payloads';
 
 export interface CreateAssetData {
   name: string;
@@ -121,15 +128,17 @@ export class AssetService {
   private assetTemplateService: AssetTemplateService;
   private locationService: LocationService;
   private activityStreamService: ActivityStreamService;
+  private auditService: AuditService;
 
   /**
    * Creates an instance of AssetService.
-   * Initializes dependencies for asset template and location services.
+   * Initializes dependencies for asset template, location, and audit services.
    */
   constructor() {
     this.assetTemplateService = new AssetTemplateService();
     this.locationService = new LocationService();
     this.activityStreamService = new ActivityStreamService(prisma);
+    this.auditService = new AuditService();
   }
 
   /**
@@ -183,6 +192,7 @@ export class AssetService {
    * });
    */
   async createAsset(
+    context: IRequestContext,
     data: CreateAssetData,
     createdBy?: { id: string; name: string },
   ): Promise<AssetWithRelations> {
@@ -281,37 +291,50 @@ export class AssetService {
       }
     }
 
-    // Create asset
-    const asset = await prisma.asset.create({
-      data: {
-        id: assetId,
-        name,
-        category,
-        status,
-        path,
-        assetTemplateId,
-        locationId,
-        parentId,
-        organizationId,
-        customFields: finalCustomFields as Prisma.InputJsonValue,
-        qrCode: generatedQrCode,
-        ...assetData,
-        purchasePrice: assetData.purchasePrice
-          ? new Prisma.Decimal(assetData.purchasePrice)
-          : undefined,
-      },
-      include: {
-        location: true,
-        assetTemplate: true,
-        parent: true,
-        _count: {
-          select: {
-            children: true,
-            tasks: true,
-            attachments: true,
+    // Create asset within a transaction for audit logging
+    const asset = await prisma.$transaction(async (tx) => {
+      const newAsset = await tx.asset.create({
+        data: {
+          id: assetId,
+          name,
+          category,
+          status,
+          path,
+          assetTemplateId,
+          locationId,
+          parentId,
+          organizationId,
+          customFields: finalCustomFields as Prisma.InputJsonValue,
+          qrCode: generatedQrCode,
+          ...assetData,
+          purchasePrice: assetData.purchasePrice
+            ? new Prisma.Decimal(assetData.purchasePrice)
+            : undefined,
+        },
+        include: {
+          location: true,
+          assetTemplate: true,
+          parent: true,
+          _count: {
+            select: {
+              children: true,
+              tasks: true,
+              attachments: true,
+            },
           },
         },
-      },
+      });
+
+      // Add audit log
+      await this.auditService.log(tx, {
+        context,
+        model: 'Asset',
+        recordId: newAsset.id,
+        action: 'CREATE',
+        newValue: newAsset,
+      });
+
+      return newAsset;
     });
 
     // Emit activity event if creator information is provided
@@ -350,32 +373,72 @@ export class AssetService {
       }
     }
 
-    // Emit webhook event
+    // Emit enhanced webhook event
     try {
-      await webhookService.emitEvent({
-        id: `asset-created-${asset.id}-${Date.now()}`,
-        type: 'asset.created',
-        organizationId: data.organizationId,
-        timestamp: new Date(),
-        data: {
-          assetId: asset.id,
-          name: asset.name,
-          category: asset.category,
-          status: asset.status,
-          locationId: asset.locationId,
-          templateId: asset.assetTemplateId,
-          parentId: asset.parentId,
-          qrCode: asset.qrCode,
-          serialNumber: asset.serialNumber,
-          manufacturer: asset.manufacturer,
-          modelNumber: asset.modelNumber,
-        },
-        userId: createdBy?.id,
-        metadata: {
-          source: 'asset-service',
-          action: 'create',
-        },
-      });
+      if (createdBy?.id) {
+        const payload: AssetCreatedPayload = {
+          asset: {
+            id: asset.id,
+            name: asset.name,
+            category: asset.category,
+            status: asset.status,
+            qrCode: asset.qrCode || undefined,
+            serialNumber: asset.serialNumber || undefined,
+            locationId: asset.locationId || undefined,
+            locationName: location?.name,
+            assetTemplateId: asset.assetTemplateId || undefined,
+            assetTemplateName: template?.name
+          },
+          location: location ? {
+            id: location.id,
+            name: location.name,
+            path: location.path
+          } : undefined,
+          parentAsset: parentAsset ? {
+            id: parentAsset.id,
+            name: parentAsset.name
+          } : undefined,
+          customFields: asset.customFields as Record<string, any> || undefined
+        };
+
+        const enhancedEvent = await webhookService.createEnhancedEvent(
+          'asset.created',
+          data.organizationId,
+          createdBy.id,
+          payload
+        );
+
+        await webhookService.emitEvent(enhancedEvent);
+      } else {
+        // Fallback to legacy format if no userId
+        await webhookService.emitEvent({
+          id: `asset-created-${asset.id}-${Date.now()}`,
+          type: 'asset.created',
+          organizationId: data.organizationId,
+          timestamp: new Date(),
+          data: {
+            assetId: asset.id,
+            name: asset.name,
+            category: asset.category,
+            status: asset.status,
+            locationId: asset.locationId,
+            locationName: location?.name,
+            templateId: asset.assetTemplateId,
+            templateName: template?.name,
+            parentId: asset.parentId,
+            parentName: parentAsset?.name,
+            qrCode: asset.qrCode,
+            serialNumber: asset.serialNumber,
+            manufacturer: asset.manufacturer,
+            modelNumber: asset.modelNumber,
+            customFields: asset.customFields
+          },
+          metadata: {
+            source: 'asset-service',
+            action: 'create',
+          },
+        });
+      }
     } catch (error) {
       // Log but don't fail the primary operation
       console.error('Failed to emit asset.created webhook event:', error);
@@ -428,7 +491,9 @@ export class AssetService {
   /**
    * Update an existing asset with validation of all relationships.
    * Handles complex operations like parent changes, template switches, and path updates.
+   * Implements Service-Level Contextual Auditing pattern with transactional integrity.
    *
+   * @param {IRequestContext} context - The request context containing user information for audit logging
    * @param {string} id - The ID of the asset to update
    * @param {UpdateAssetData} data - The update data
    * @param {string} organizationId - The organization ID for access control
@@ -438,195 +503,333 @@ export class AssetService {
    * @throws {AppError} If custom fields fail template validation
    *
    * @example
-   * const updated = await assetService.updateAsset('asset-123', {
+   * const context = { userId: 'user-123', organizationId: 'org-789' };
+   * const updated = await assetService.updateAsset(context, 'asset-123', {
    *   name: 'Updated Laptop',
    *   status: 'MAINTENANCE',
    *   locationId: 'new-location-456'
    * }, 'org-789');
    */
   async updateAsset(
+    context: IRequestContext,
     id: string,
     data: UpdateAssetData,
     organizationId: string,
   ): Promise<AssetWithRelations> {
-    // Get existing asset
-    const asset = await this.getAssetById(id, organizationId);
-    if (!asset) {
-      throw new NotFoundError('Asset');
-    }
-
-    const {
-      assetTemplateId,
-      locationId,
-      parentId,
-      customFields,
-      qrCode,
-      purchasePrice,
-      ...updateData
-    } = data;
-
-    // Validate template change if provided
-    if (assetTemplateId !== undefined) {
-      if (assetTemplateId === null) {
-        // Removing template is allowed
-      } else {
-        const template = await this.assetTemplateService.getTemplateById(
-          assetTemplateId,
-          organizationId,
-        );
-        if (!template) {
-          throw new NotFoundError('Asset template');
-        }
-
-        // If category is being changed, ensure it matches template
-        const newCategory = data.category || asset.category;
-        if (template.category !== newCategory) {
-          throw new ConflictError('Asset category must match template category');
-        }
-
-        // Validate custom fields if provided
-        if (customFields) {
-          const validation = await this.assetTemplateService.validateCustomFieldValues(
-            assetTemplateId,
-            customFields,
-            organizationId,
-          );
-          if (!validation.valid) {
-            throw new AppError(`Invalid custom fields: ${validation.errors.join(', ')}`, 400);
-          }
-        }
-      }
-    }
-
-    // Validate location change if provided
-    if (locationId !== undefined && locationId !== null) {
-      const location = await this.locationService.getLocationById(locationId, organizationId);
-      if (!location) {
-        throw new NotFoundError('Location');
-      }
-      // Verify location belongs to organization
-      if (location.organizationId !== organizationId) {
-        throw new ConflictError('Location does not belong to this organization');
-      }
-    }
-
-    // Handle parent change
-    let newPath = asset.path;
-    if (parentId !== undefined) {
-      if (parentId === null) {
-        // Moving to root
-        newPath = this.generatePath(null, asset.id);
-      } else {
-        // Validate new parent
-        if (parentId === id) {
-          throw new ConflictError('Asset cannot be its own parent');
-        }
-
-        const newParent = await this.getAssetById(parentId, organizationId);
-        if (!newParent) {
-          throw new NotFoundError('Parent asset');
-        }
-
-        // Prevent circular dependency
-        if (newParent.path.startsWith(asset.path)) {
-          throw new ConflictError('Cannot move asset to be a child of itself or its descendants');
-        }
-
-        newPath = this.generatePath(newParent.path, asset.id);
-      }
-
-      // If path changes, update all descendants
-      if (newPath !== asset.path) {
-        await this.updateDescendantPaths(asset.id, asset.path, newPath);
-      }
-    }
-
-    // Validate QR code uniqueness if changing
-    if (qrCode !== undefined && qrCode !== asset.qrCode) {
-      const existingAsset = await prisma.asset.findFirst({
-        where: {
-          qrCode,
-          id: { not: id },
+    // Store data for webhook emission after transaction
+    let assetBeforeState: AssetWithRelations | null = null;
+    let assetAfterState: AssetWithRelations | null = null;
+    
+    // Implement the fetch-update-log pattern within a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Step 1: FETCH - Get existing asset (inside transaction for consistency)
+      const assetBefore = await tx.asset.findFirst({
+        where: { id, organizationId },
+        include: {
+          location: true,
+          assetTemplate: true,
+          parent: true,
+          children: { orderBy: { name: 'asc' } },
+          _count: {
+            select: { children: true, tasks: true, attachments: true },
+          },
         },
       });
-      if (existingAsset) {
-        throw new ConflictError('QR code already exists');
+      
+      if (!assetBefore) {
+        throw new NotFoundError('Asset');
       }
-    }
+      
+      // Store for webhook emission
+      assetBeforeState = assetBefore as AssetWithRelations;
 
-    // Update asset
-    const updatedAsset = await prisma.asset.update({
-      where: { id },
-      data: {
-        ...updateData,
+      const {
         assetTemplateId,
         locationId,
         parentId,
-        path: newPath,
-        customFields:
-          customFields !== undefined ? (customFields as Prisma.InputJsonValue) : undefined,
+        customFields,
         qrCode,
-        purchasePrice:
-          purchasePrice !== undefined
-            ? purchasePrice === null
-              ? null
-              : new Prisma.Decimal(purchasePrice)
-            : undefined,
-      },
-      include: {
-        location: true,
-        assetTemplate: true,
-        parent: true,
-        children: {
-          orderBy: { name: 'asc' },
+        purchasePrice,
+        ...updateData
+      } = data;
+
+      // Validate template change if provided
+      if (assetTemplateId !== undefined) {
+        if (assetTemplateId === null) {
+          // Removing template is allowed
+        } else {
+          const template = await this.assetTemplateService.getTemplateById(
+            assetTemplateId,
+            organizationId,
+          );
+          if (!template) {
+            throw new NotFoundError('Asset template');
+          }
+
+          // If category is being changed, ensure it matches template
+          const newCategory = data.category || assetBefore.category;
+          if (template.category !== newCategory) {
+            throw new ConflictError('Asset category must match template category');
+          }
+
+          // Validate custom fields if provided
+          if (customFields) {
+            const validation = await this.assetTemplateService.validateCustomFieldValues(
+              assetTemplateId,
+              customFields,
+              organizationId,
+            );
+            if (!validation.valid) {
+              throw new AppError(`Invalid custom fields: ${validation.errors.join(', ')}`, 400);
+            }
+          }
+        }
+      }
+
+      // Validate location change if provided
+      if (locationId !== undefined && locationId !== null) {
+        const location = await this.locationService.getLocationById(locationId, organizationId);
+        if (!location) {
+          throw new NotFoundError('Location');
+        }
+        // Verify location belongs to organization
+        if (location.organizationId !== organizationId) {
+          throw new ConflictError('Location does not belong to this organization');
+        }
+      }
+
+      // Handle parent change
+      let newPath = assetBefore.path;
+      if (parentId !== undefined) {
+        if (parentId === null) {
+          // Moving to root
+          newPath = this.generatePath(null, assetBefore.id);
+        } else {
+          // Validate new parent
+          if (parentId === id) {
+            throw new ConflictError('Asset cannot be its own parent');
+          }
+
+          const newParent = await this.getAssetById(parentId, organizationId);
+          if (!newParent) {
+            throw new NotFoundError('Parent asset');
+          }
+
+          // Prevent circular dependency
+          if (newParent.path.startsWith(assetBefore.path)) {
+            throw new ConflictError('Cannot move asset to be a child of itself or its descendants');
+          }
+
+          newPath = this.generatePath(newParent.path, assetBefore.id);
+        }
+
+        // If path changes, update all descendants using transaction client
+        if (newPath !== assetBefore.path) {
+          await this.updateDescendantPathsInTransaction(tx, assetBefore.id, assetBefore.path, newPath);
+        }
+      }
+
+      // Validate QR code uniqueness if changing
+      if (qrCode !== undefined && qrCode !== assetBefore.qrCode) {
+        const existingAsset = await tx.asset.findFirst({
+          where: {
+            qrCode,
+            id: { not: id },
+          },
+        });
+        if (existingAsset) {
+          throw new ConflictError('QR code already exists');
+        }
+      }
+
+      // Step 2: UPDATE - Perform the asset update within transaction
+      const updatedAsset = await tx.asset.update({
+        where: { id },
+        data: {
+          ...updateData,
+          assetTemplateId,
+          locationId,
+          parentId,
+          path: newPath,
+          customFields:
+            customFields !== undefined ? (customFields as Prisma.InputJsonValue) : undefined,
+          qrCode,
+          purchasePrice:
+            purchasePrice !== undefined
+              ? purchasePrice === null
+                ? null
+                : new Prisma.Decimal(purchasePrice)
+              : undefined,
         },
-        _count: {
-          select: {
-            children: true,
-            tasks: true,
-            attachments: true,
+        include: {
+          location: true,
+          assetTemplate: true,
+          parent: true,
+          children: {
+            orderBy: { name: 'asc' },
+          },
+          _count: {
+            select: {
+              children: true,
+              tasks: true,
+              attachments: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    // Emit webhook event
-    try {
-      await webhookService.emitEvent({
-        id: `asset-updated-${updatedAsset.id}-${Date.now()}`,
-        type: 'asset.updated',
-        organizationId: updatedAsset.organizationId,
-        timestamp: new Date(),
-        data: {
-          assetId: updatedAsset.id,
+      // Step 3: LOG - Log the audit trail within transaction
+      await this.auditService.log(tx, {
+        context,
+        model: 'Asset',
+        recordId: id,
+        action: 'UPDATE',
+        oldValue: {
+          name: assetBefore.name,
+          category: assetBefore.category,
+          status: assetBefore.status,
+          assetTemplateId: assetBefore.assetTemplateId,
+          locationId: assetBefore.locationId,
+          parentId: assetBefore.parentId,
+          manufacturer: assetBefore.manufacturer,
+          modelNumber: assetBefore.modelNumber,
+          serialNumber: assetBefore.serialNumber,
+          purchaseDate: assetBefore.purchaseDate,
+          purchasePrice: assetBefore.purchasePrice,
+          description: assetBefore.description,
+          link: assetBefore.link,
+          tags: assetBefore.tags,
+          warrantyScope: assetBefore.warrantyScope,
+          warrantyExpiry: assetBefore.warrantyExpiry,
+          warrantyLifetime: assetBefore.warrantyLifetime,
+          secondaryWarrantyScope: assetBefore.secondaryWarrantyScope,
+          secondaryWarrantyExpiry: assetBefore.secondaryWarrantyExpiry,
+          customFields: assetBefore.customFields,
+          qrCode: assetBefore.qrCode,
+          path: assetBefore.path,
+        },
+        newValue: {
           name: updatedAsset.name,
           category: updatedAsset.category,
           status: updatedAsset.status,
+          assetTemplateId: updatedAsset.assetTemplateId,
           locationId: updatedAsset.locationId,
-          templateId: updatedAsset.assetTemplateId,
           parentId: updatedAsset.parentId,
-          qrCode: updatedAsset.qrCode,
-          serialNumber: updatedAsset.serialNumber,
           manufacturer: updatedAsset.manufacturer,
           modelNumber: updatedAsset.modelNumber,
-          changes: data, // Include what was changed
-        },
-        metadata: {
-          source: 'asset-service',
-          action: 'update',
+          serialNumber: updatedAsset.serialNumber,
+          purchaseDate: updatedAsset.purchaseDate,
+          purchasePrice: updatedAsset.purchasePrice,
+          description: updatedAsset.description,
+          link: updatedAsset.link,
+          tags: updatedAsset.tags,
+          warrantyScope: updatedAsset.warrantyScope,
+          warrantyExpiry: updatedAsset.warrantyExpiry,
+          warrantyLifetime: updatedAsset.warrantyLifetime,
+          secondaryWarrantyScope: updatedAsset.secondaryWarrantyScope,
+          secondaryWarrantyExpiry: updatedAsset.secondaryWarrantyExpiry,
+          customFields: updatedAsset.customFields,
+          qrCode: updatedAsset.qrCode,
+          path: updatedAsset.path,
         },
       });
-    } catch (error) {
-      // Log but don't fail the primary operation
-      console.error('Failed to emit asset.updated webhook event:', error);
+      
+      // Store for webhook emission
+      assetAfterState = updatedAsset as AssetWithRelations;
+
+      return updatedAsset as AssetWithRelations;
+    });
+
+    // Emit webhook event after successful transaction
+    if (assetBeforeState && assetAfterState) {
+      try {
+        // Prepare changes array
+        const changes: Array<{ field: string; oldValue: any; newValue: any }> = [];
+        
+        // Compare and track changes
+        if (data.name !== undefined && data.name !== assetBeforeState.name) {
+          changes.push({ field: 'name', oldValue: assetBeforeState.name, newValue: data.name });
+        }
+        if (data.status !== undefined && data.status !== assetBeforeState.status) {
+          changes.push({ field: 'status', oldValue: assetBeforeState.status, newValue: data.status });
+        }
+        if (data.locationId !== undefined && data.locationId !== assetBeforeState.locationId) {
+          changes.push({ 
+            field: 'location', 
+            oldValue: assetBeforeState.location?.name || null, 
+            newValue: assetAfterState.location?.name || null 
+          });
+        }
+        if (data.parentId !== undefined && data.parentId !== assetBeforeState.parentId) {
+          changes.push({ 
+            field: 'parent', 
+            oldValue: assetBeforeState.parent?.name || null, 
+            newValue: assetAfterState.parent?.name || null 
+          });
+        }
+        if (data.assetTemplateId !== undefined && data.assetTemplateId !== assetBeforeState.assetTemplateId) {
+          changes.push({ 
+            field: 'template', 
+            oldValue: assetBeforeState.assetTemplate?.name || null, 
+            newValue: assetAfterState.assetTemplate?.name || null 
+          });
+        }
+        if (data.customFields !== undefined) {
+          changes.push({ 
+            field: 'customFields', 
+            oldValue: assetBeforeState.customFields, 
+            newValue: assetAfterState.customFields 
+          });
+        }
+
+        // Create enhanced webhook event
+        const payload: AssetUpdatedPayload = {
+          asset: {
+            id: assetAfterState.id,
+            name: assetAfterState.name,
+            category: assetAfterState.category,
+            status: assetAfterState.status,
+            qrCode: assetAfterState.qrCode || undefined,
+            serialNumber: assetAfterState.serialNumber || undefined,
+            locationId: assetAfterState.locationId || undefined,
+            locationName: assetAfterState.location?.name,
+            assetTemplateId: assetAfterState.assetTemplateId || undefined,
+            assetTemplateName: assetAfterState.assetTemplate?.name
+          },
+          changes,
+          location: assetAfterState.location ? {
+            id: assetAfterState.location.id,
+            name: assetAfterState.location.name,
+            path: assetAfterState.location.path
+          } : undefined,
+          previousLocation: assetBeforeState.location ? {
+            id: assetBeforeState.location.id,
+            name: assetBeforeState.location.name,
+            path: assetBeforeState.location.path
+          } : undefined
+        };
+
+        const enhancedEvent = await webhookService.createEnhancedEvent(
+          'asset.updated',
+          organizationId,
+          context.userId,
+          payload
+        );
+
+        await webhookService.emitEvent(enhancedEvent);
+      } catch (error) {
+        // Log but don't fail the primary operation
+        console.error('Failed to emit asset.updated webhook event:', error);
+      }
     }
 
-    return updatedAsset as AssetWithRelations;
+    return result;
   }
 
   /**
    * Update paths for all descendant assets when an asset is moved.
    * Uses raw SQL for efficient bulk update of materialized paths.
+   * Note: This is the legacy non-transactional version. Use updateDescendantPathsInTransaction when possible.
    *
    * @param {string} assetId - The ID of the asset being moved
    * @param {string} oldPath - The current path of the asset
@@ -634,12 +837,36 @@ export class AssetService {
    * @returns {Promise<void>}
    * @private
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async updateDescendantPaths(
     assetId: string,
     oldPath: string,
     newPath: string,
   ): Promise<void> {
     await prisma.$executeRawUnsafe(
+      `
+      UPDATE assets
+      SET path = REPLACE(path, $1, $2)
+      WHERE path LIKE $3 AND id != $4
+    `,
+      oldPath,
+      newPath,
+      `${oldPath}/%`,
+      assetId,
+    );
+  }
+
+  /**
+   * Update descendant paths within a transaction.
+   * This is a transaction-aware version of updateDescendantPaths.
+   */
+  private async updateDescendantPathsInTransaction(
+    tx: any,
+    assetId: string,
+    oldPath: string,
+    newPath: string,
+  ): Promise<void> {
+    await tx.$executeRawUnsafe(
       `
       UPDATE assets
       SET path = REPLACE(path, $1, $2)
@@ -670,7 +897,7 @@ export class AssetService {
    * // Delete asset and all its children
    * await assetService.deleteAsset('asset-123', 'org-456', true);
    */
-  async deleteAsset(id: string, organizationId: string, cascade = false): Promise<void> {
+  async deleteAsset(context: IRequestContext, id: string, organizationId: string, cascade = false): Promise<void> {
     const asset = await this.getAssetById(id, organizationId);
     if (!asset) {
       throw new NotFoundError('Asset');
@@ -699,8 +926,20 @@ export class AssetService {
       }
     }
 
-    // Delete asset (cascade will handle children due to DB constraints)
-    await prisma.asset.delete({ where: { id } });
+    // Delete asset within a transaction for audit logging
+    await prisma.$transaction(async (tx) => {
+      // Add audit log before deletion
+      await this.auditService.log(tx, {
+        context,
+        model: 'Asset',
+        recordId: id,
+        action: 'DELETE',
+        oldValue: asset,
+      });
+
+      // Delete asset (cascade will handle children due to DB constraints)
+      await tx.asset.delete({ where: { id } });
+    });
 
     // Emit webhook event
     try {
@@ -715,12 +954,18 @@ export class AssetService {
           category: asset.category,
           status: asset.status,
           locationId: asset.locationId,
+          locationName: asset.location?.name,
           templateId: asset.assetTemplateId,
+          templateName: asset.assetTemplate?.name,
           parentId: asset.parentId,
           qrCode: asset.qrCode,
           serialNumber: asset.serialNumber,
           manufacturer: asset.manufacturer,
           modelNumber: asset.modelNumber,
+          childAssets: asset.children.map(child => ({
+            id: child.id,
+            name: child.name
+          }))
         },
         metadata: {
           source: 'asset-service',
@@ -760,6 +1005,7 @@ export class AssetService {
    * });
    */
   async moveAsset(
+    context: IRequestContext,
     id: string,
     organizationId: string,
     options: { newParentId?: string | null; newLocationId?: string | null },
@@ -774,7 +1020,7 @@ export class AssetService {
       updateData.locationId = options.newLocationId;
     }
 
-    return this.updateAsset(id, updateData, organizationId);
+    return this.updateAsset(context, id, updateData, organizationId);
   }
 
   /**

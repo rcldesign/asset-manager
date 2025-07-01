@@ -9,6 +9,7 @@ import {
   type Resource,
   type PermissionContext,
 } from '../lib/permissions';
+import type { IRequestContext } from '../interfaces/context.interface';
 
 export interface AuthenticatedRequest extends Request {
   user: {
@@ -20,6 +21,7 @@ export interface AuthenticatedRequest extends Request {
     tokenId?: string;
   };
   permissionContext?: PermissionContext;
+  context?: IRequestContext;
 }
 
 // Track failed authentication attempts
@@ -402,4 +404,33 @@ export function requireOrganizationAccess(req: Request, _res: Response, next: Ne
   }
 
   next();
+}
+
+/**
+ * Combined authentication middleware that sets up user context
+ * This middleware authenticates the user and sets up both user and context objects
+ * @param req - Express request object
+ * @param res - Express response object
+ * @param next - Express next function
+ */
+export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
+  authenticateRequest(req, res, (error?: any) => {
+    if (error) {
+      next(error);
+      return;
+    }
+
+    const authenticatedReq = req as AuthenticatedRequest;
+    
+    if (authenticatedReq.user) {
+      // Set up context for service calls
+      authenticatedReq.context = {
+        userId: authenticatedReq.user.id,
+        userRole: authenticatedReq.user.role,
+        organizationId: authenticatedReq.user.organizationId,
+      };
+    }
+
+    next();
+  });
 }

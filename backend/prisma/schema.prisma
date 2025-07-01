@@ -107,10 +107,30 @@ enum WebhookEventType {
   task_updated    @map("task.updated")
   task_completed  @map("task.completed")
   task_assigned   @map("task.assigned")
+  task_deleted   @map("task.deleted")
+  task_overdue   @map("task.overdue")
   asset_created   @map("asset.created")
   asset_updated   @map("asset.updated")
   asset_deleted   @map("asset.deleted")
+  schedule_created @map("schedule.created")
+  schedule_updated @map("schedule.updated")
+  schedule_deleted @map("schedule.deleted")
   schedule_triggered @map("schedule.triggered")
+  user_invited    @map("user.invited")
+  user_joined     @map("user.joined")
+  user_deactivated @map("user.deactivated")
+  maintenance_started @map("maintenance.started")
+  maintenance_completed @map("maintenance.completed")
+  warranty_expiring @map("warranty.expiring")
+  warranty_expired @map("warranty.expired")
+  audit_created   @map("audit.created")
+  report_generated @map("report.generated")
+  report_scheduled @map("report.scheduled")
+  backup_created  @map("backup.created")
+  backup_restored @map("backup.restored")
+  sync_completed  @map("sync.completed")
+  gdpr_export_requested @map("gdpr.export_requested")
+  gdpr_deletion_requested @map("gdpr.deletion_requested")
 }
 
 // Core entities for Phase 1
@@ -134,6 +154,8 @@ model Organization {
   activityStreams ActivityStream[]
   activities      Activity[]
   webhookSubscriptions WebhookSubscription[]
+  scheduledReports ScheduledReport[]
+  reportHistory   ReportHistory[]
 
   @@map("organizations")
 }
@@ -143,7 +165,11 @@ model User {
   email                   String   @unique
   passwordHash            String? // Optional for OIDC-only users
   role                    UserRole @default(MEMBER)
+  firstName               String?
+  lastName                String?
   fullName                String?
+  avatarUrl               String?
+  lastActiveAt            DateTime?
   organizationId          String
   totpSecret              String? // For 2FA
   totpEnabled             Boolean  @default(false)
@@ -163,12 +189,17 @@ model User {
   assetAttachments    AssetAttachment[]
   notifications       Notification[]
   invitationsSent     UserInvitation[]  @relation("InvitedBy")
-  activityStreams     ActivityStream[]
+  activityStreams     ActivityStream[]   @relation("actor")
   notificationPrefs   UserNotificationPreference[]
   calendarIntegrations CalendarIntegration[]
   mentions            Mention[]
   googleCredentials   GoogleCredentials?
   pushSubscriptions   PushSubscription[]
+  auditEntries        AuditTrail[]
+  customReports       CustomReport[]
+  syncClients         SyncClient[]
+  scheduledReports    ScheduledReport[]
+  reportHistory       ReportHistory[]
 
   @@map("users")
 }
@@ -624,11 +655,12 @@ model ActivityStream {
   action         ActivityAction
   entityType     ActivityEntityType
   entityId       String
+  entityName     String?
   metadata       Json?              @default("{}")
   createdAt      DateTime           @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actor        User         @relation("actor", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([userId])
@@ -837,5 +869,239 @@ model WebhookDelivery {
   @@index([eventType])
   @@index([createdAt(sort: Desc)])
   @@map("webhook_deliveries")
+}
+
+// Phase 4: Dashboards, Reporting, and Audit Trail
+
+// Enum for the type of action being audited
+enum ActionType {
+  CREATE
+  UPDATE
+  DELETE
+  UPDATE_MANY
+  DELETE_MANY
+}
+
+// Enum for the frequency of scheduled reports
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+// Enum for report types
+enum ReportType {
+  ASSET
+  TASK
+  USER
+  MAINTENANCE
+  COST_ANALYSIS
+  USAGE_STATISTICS
+  CUSTOM
+}
+
+// Enum for report status
+enum ReportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+model AuditTrail {
+  id        String     @id @default(uuid())
+  model     String     // e.g., "Asset", "User", "Task"
+  recordId  String     // The ID of the record that was changed
+  action    ActionType
+  oldValue  Json?      @db.JsonB // State before the change (null for CREATE)
+  newValue  Json?      @db.JsonB // State after the change (null for DELETE)
+  userId    String     // ID of the user performing the action
+  user      User       @relation(fields: [userId], references: [id])
+  createdAt DateTime   @default(now())
+
+  // Indexes for common query patterns
+  @@index([model, recordId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_trail")
+}
+
+model CustomReport {
+  id            String            @id @default(uuid())
+  name          String
+  description   String?
+  configuration Json              @db.JsonB // Stores filters, columns, groupings, etc.
+  ownerId       String
+  owner         User              @relation(fields: [ownerId], references: [id])
+  schedules     ScheduledReport[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([ownerId])
+  @@map("custom_reports")
+}
+
+model ScheduledReport {
+  id              String          @id @default(uuid())
+  organizationId  String
+  createdById     String
+  name            String
+  description     String?
+  type            String          // 'asset', 'task', 'user', 'custom'
+  format          String          // 'pdf', 'csv', 'xlsx'
+  schedule        Json            // Schedule configuration
+  recipients      String[]        // Array of email addresses
+  filters         Json?           // Report filters
+  enabled         Boolean         @default(true)
+  lastRunAt       DateTime?
+  nextRunAt       DateTime
+  customReportId  String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy       User            @relation(fields: [createdById], references: [id])
+  report          CustomReport?   @relation(fields: [customReportId], references: [id])
+  reportHistory   ReportHistory[]
+
+  @@index([nextRunAt, enabled]) // For the scheduler worker to find jobs
+  @@index([organizationId])
+  @@index([customReportId])
+  @@map("scheduled_reports")
+}
+
+model ReportHistory {
+  id                String           @id @default(uuid())
+  organizationId    String
+  generatedById     String
+  type              String           // 'asset', 'task', 'user', 'custom'
+  format            String           // 'pdf', 'csv', 'xlsx'
+  parameters        Json             // Report parameters and filters
+  filePath          String           // Path to generated file
+  fileSize          BigInt
+  recordCount       Int
+  generatedAt       DateTime
+  scheduledReportId String?          // NULL for one-time reports
+  createdAt         DateTime         @default(now())
+
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  generatedBy       User             @relation(fields: [generatedById], references: [id])
+  scheduledReport   ScheduledReport? @relation(fields: [scheduledReportId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([generatedById])
+  @@index([generatedAt])
+  @@index([scheduledReportId])
+  @@map("report_history")
+}
+
+// PWA Offline Sync Models
+
+enum SyncStatus {
+  PENDING
+  SYNCING
+  COMPLETED
+  FAILED
+  CONFLICT
+}
+
+enum ConflictResolution {
+  CLIENT_WINS
+  SERVER_WINS
+  MANUAL
+  MERGE
+}
+
+enum SyncOperation {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+// Tracks sync state for each client device
+model SyncClient {
+  id              String   @id @default(uuid())
+  userId          String
+  deviceId        String   // Unique device identifier from PWA
+  deviceName      String?  // Human-readable device name
+  lastSyncAt      DateTime?
+  syncToken       String?  // Token for incremental sync
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  syncQueues      SyncQueue[]
+  syncMetadata    SyncMetadata[]
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+  @@index([lastSyncAt])
+  @@map("sync_clients")
+}
+
+// Queue for pending sync operations from offline clients
+model SyncQueue {
+  id              String          @id @default(uuid())
+  clientId        String
+  entityType      String          // 'asset', 'task', 'schedule', etc.
+  entityId        String
+  operation       SyncOperation
+  payload         Json            // The actual data to sync
+  clientVersion   Int             // Version number from client
+  status          SyncStatus      @default(PENDING)
+  conflictData    Json?           // Store conflict info if detected
+  resolution      ConflictResolution?
+  retryCount      Int             @default(0)
+  errorMessage    String?
+  createdAt       DateTime        @default(now())
+  processedAt     DateTime?
+
+  client          SyncClient      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, status])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("sync_queue")
+}
+
+// Metadata for tracking entity versions and sync state
+model SyncMetadata {
+  id              String   @id @default(uuid())
+  entityType      String   // 'asset', 'task', 'schedule', etc.
+  entityId        String
+  version         Int      @default(1)
+  lastModifiedBy  String   // userId
+  lastModifiedAt  DateTime @default(now())
+  checksum        String?  // For integrity checking
+  deletedAt       DateTime? // Soft delete tracking for sync
+  clientId        String?  // Track which client made the change
+
+  client          SyncClient? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@unique([entityType, entityId])
+  @@index([entityType, lastModifiedAt])
+  @@index([deletedAt])
+  @@map("sync_metadata")
+}
+
+// Conflict resolution history
+model SyncConflict {
+  id              String             @id @default(uuid())
+  entityType      String
+  entityId        String
+  clientVersion   Int
+  serverVersion   Int
+  clientData      Json
+  serverData      Json
+  resolution      ConflictResolution
+  resolvedBy      String?            // userId who resolved manual conflicts
+  resolvedAt      DateTime?
+  createdAt       DateTime           @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("sync_conflicts")
 }
 

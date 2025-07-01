@@ -1,0 +1,25 @@
+-- This migration is handled by Prisma's enum management
+-- The WebhookEventType enum has been updated in schema.prisma to include:
+-- - task_deleted
+-- - task_overdue
+-- - schedule_created
+-- - schedule_updated
+-- - schedule_deleted
+-- - user_invited
+-- - user_joined
+-- - user_deactivated
+-- - maintenance_started
+-- - maintenance_completed
+-- - warranty_expiring
+-- - warranty_expired
+-- - audit_created
+-- - report_generated
+-- - report_scheduled
+-- - backup_created
+-- - backup_restored
+-- - sync_completed
+-- - gdpr_export_requested
+-- - gdpr_deletion_requested
+
+-- Prisma will handle the enum update automatically when running:
+-- npx prisma migrate dev --name add_phase_4_webhook_events
