@@ -1,13 +1,13 @@
-import type { 
-  AssetCategory, 
-  AssetStatus, 
-  TaskStatus, 
+import type {
+  AssetCategory,
+  AssetStatus,
+  TaskStatus,
   TaskPriority,
   UserRole,
   ActionType,
   ConflictResolution,
   ReportType,
-  ReportStatus
+  ReportStatus,
 } from '@prisma/client';
 
 // Base interfaces for common structures
@@ -402,4 +402,6 @@ export interface WebhookEventPayloadMap {
 }
 
 // Helper type for creating strongly typed webhook events
-export type TypedWebhookEvent<T extends keyof WebhookEventPayloadMap> = EnhancedWebhookEvent<WebhookEventPayloadMap[T]>;
+export type TypedWebhookEvent<T extends keyof WebhookEventPayloadMap> = EnhancedWebhookEvent<
+  WebhookEventPayloadMap[T]
+>;

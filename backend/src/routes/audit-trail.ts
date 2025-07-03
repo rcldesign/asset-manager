@@ -149,7 +149,7 @@ router.get(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -204,14 +204,14 @@ router.get(
       const result = await auditService.queryAuditTrail(
         prisma,
         { recordId },
-        { page: 1, limit: 100 }
+        { page: 1, limit: 100 },
       );
 
       res.json(result);
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -316,9 +316,10 @@ router.get(
       });
 
       // Calculate summary statistics
-      const activityByModel: Record<string, { creates: number; updates: number; deletes: number }> = {};
-      
-      entries.forEach(entry => {
+      const activityByModel: Record<string, { creates: number; updates: number; deletes: number }> =
+        {};
+
+      entries.forEach((entry) => {
         if (!activityByModel[entry.model]) {
           activityByModel[entry.model] = { creates: 0, updates: 0, deletes: 0 };
         }
@@ -351,7 +352,7 @@ router.get(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 export default router;

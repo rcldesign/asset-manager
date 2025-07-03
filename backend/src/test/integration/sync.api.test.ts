@@ -27,17 +27,17 @@ describe('Sync API Integration Tests', () => {
     await prisma.syncQueue.deleteMany({
       where: {
         client: {
-          userId
-        }
-      }
+          userId,
+        },
+      },
     });
     await prisma.syncClient.deleteMany({
-      where: { userId }
+      where: { userId },
     });
     await prisma.syncMetadata.deleteMany({
       where: {
-        lastModifiedBy: userId
-      }
+        lastModifiedBy: userId,
+      },
     });
     await prisma.user.delete({ where: { id: userId } });
     await prisma.organization.delete({ where: { id: organizationId } });
@@ -48,12 +48,12 @@ describe('Sync API Integration Tests', () => {
     await prisma.syncQueue.deleteMany({
       where: {
         client: {
-          userId
-        }
-      }
+          userId,
+        },
+      },
     });
     await prisma.syncClient.deleteMany({
-      where: { userId }
+      where: { userId },
     });
   });
 
@@ -62,7 +62,7 @@ describe('Sync API Integration Tests', () => {
       const syncRequest = {
         deviceId,
         deviceName: 'Test Device',
-        changes: []
+        changes: [],
       };
 
       const response = await request(app)
@@ -80,7 +80,7 @@ describe('Sync API Integration Tests', () => {
 
       // Verify client was registered
       const client = await prisma.syncClient.findFirst({
-        where: { userId, deviceId }
+        where: { userId, deviceId },
       });
       expect(client).not.toBeNull();
       expect(client?.deviceName).toBe('Test Device');
@@ -96,8 +96,8 @@ describe('Sync API Integration Tests', () => {
           category: 'HARDWARE',
           description: 'Test template',
           defaultFields: {},
-          customFields: {}
-        }
+          customFields: {},
+        },
       });
 
       const syncRequest = {
@@ -117,12 +117,12 @@ describe('Sync API Integration Tests', () => {
               assetTemplateId: assetTemplate.id,
               path: '/asset-123',
               tags: [],
-              customFields: {}
+              customFields: {},
             },
             clientVersion: 1,
-            timestamp: new Date().toISOString()
-          }
-        ]
+            timestamp: new Date().toISOString(),
+          },
+        ],
       };
 
       const response = await request(app)
@@ -135,7 +135,7 @@ describe('Sync API Integration Tests', () => {
 
       // Verify asset was created
       const asset = await prisma.asset.findUnique({
-        where: { id: 'asset-123' }
+        where: { id: 'asset-123' },
       });
       expect(asset).not.toBeNull();
       expect(asset?.name).toBe('Test Asset');
@@ -146,9 +146,9 @@ describe('Sync API Integration Tests', () => {
         where: {
           entityType_entityId: {
             entityType: 'asset',
-            entityId: 'asset-123'
-          }
-        }
+            entityId: 'asset-123',
+          },
+        },
       });
       expect(metadata).not.toBeNull();
       expect(metadata?.version).toBe(1);
@@ -165,8 +165,8 @@ describe('Sync API Integration Tests', () => {
           status: 'OPERATIONAL',
           path: '/asset-conflict',
           tags: [],
-          customFields: {}
-        }
+          customFields: {},
+        },
       });
 
       // Create sync metadata for the asset
@@ -177,8 +177,8 @@ describe('Sync API Integration Tests', () => {
           version: 2,
           lastModifiedBy: 'other-user',
           lastModifiedAt: new Date(),
-          checksum: 'server-checksum'
-        }
+          checksum: 'server-checksum',
+        },
       });
 
       const syncRequest = {
@@ -190,12 +190,12 @@ describe('Sync API Integration Tests', () => {
             operation: 'UPDATE',
             payload: {
               name: 'Client Asset',
-              category: 'SOFTWARE'
+              category: 'SOFTWARE',
             },
             clientVersion: 1, // Lower than server version
-            timestamp: new Date().toISOString()
-          }
-        ]
+            timestamp: new Date().toISOString(),
+          },
+        ],
       };
 
       const response = await request(app)
@@ -210,7 +210,7 @@ describe('Sync API Integration Tests', () => {
         entityId: 'asset-conflict',
         clientVersion: 1,
         serverVersion: 2,
-        suggestedResolution: expect.any(String)
+        suggestedResolution: expect.any(String),
       });
     });
 
@@ -224,9 +224,9 @@ describe('Sync API Integration Tests', () => {
             operation: 'INVALID_OP',
             payload: {},
             clientVersion: -1,
-            timestamp: 'invalid-date'
-          }
-        ]
+            timestamp: 'invalid-date',
+          },
+        ],
       };
 
       await request(app)
@@ -239,13 +239,10 @@ describe('Sync API Integration Tests', () => {
     it('should require authentication', async () => {
       const syncRequest = {
         deviceId,
-        changes: []
+        changes: [],
       };
 
-      await request(app)
-        .post('/api/sync')
-        .send(syncRequest)
-        .expect(401);
+      await request(app).post('/api/sync').send(syncRequest).expect(401);
     });
   });
 
@@ -256,8 +253,8 @@ describe('Sync API Integration Tests', () => {
         data: {
           userId,
           deviceId,
-          deviceName: 'Test Device'
-        }
+          deviceName: 'Test Device',
+        },
       });
     });
 
@@ -272,8 +269,8 @@ describe('Sync API Integration Tests', () => {
           status: 'OPERATIONAL',
           path: '/delta-asset',
           tags: [],
-          customFields: {}
-        }
+          customFields: {},
+        },
       });
 
       await prisma.syncMetadata.create({
@@ -283,14 +280,14 @@ describe('Sync API Integration Tests', () => {
           version: 1,
           lastModifiedBy: userId,
           lastModifiedAt: new Date(),
-          checksum: 'test-checksum'
-        }
+          checksum: 'test-checksum',
+        },
       });
 
       const deltaRequest = {
         deviceId,
         entityTypes: ['asset'],
-        pageSize: 10
+        pageSize: 10,
       };
 
       const response = await request(app)
@@ -309,7 +306,7 @@ describe('Sync API Integration Tests', () => {
       const deltaRequest = {
         deviceId,
         pageSize: 1,
-        pageToken: '0'
+        pageToken: '0',
       };
 
       const response = await request(app)
@@ -331,8 +328,8 @@ describe('Sync API Integration Tests', () => {
         data: {
           userId,
           deviceId,
-          deviceName: 'Test Device'
-        }
+          deviceName: 'Test Device',
+        },
       });
 
       const response = await request(app)
@@ -354,8 +351,8 @@ describe('Sync API Integration Tests', () => {
         data: {
           userId,
           deviceId,
-          deviceName: 'Test Device'
-        }
+          deviceName: 'Test Device',
+        },
       });
 
       const response = await request(app)
@@ -368,7 +365,7 @@ describe('Sync API Integration Tests', () => {
       expect(response.body[0]).toMatchObject({
         deviceId,
         deviceName: 'Test Device',
-        userId
+        userId,
       });
     });
   });
@@ -380,8 +377,8 @@ describe('Sync API Integration Tests', () => {
         data: {
           userId,
           deviceId,
-          deviceName: 'Test Device'
-        }
+          deviceName: 'Test Device',
+        },
       });
 
       await request(app)
@@ -391,7 +388,7 @@ describe('Sync API Integration Tests', () => {
 
       // Verify device was deactivated
       const updatedClient = await prisma.syncClient.findUnique({
-        where: { id: client.id }
+        where: { id: client.id },
       });
       expect(updatedClient?.isActive).toBe(false);
     });
@@ -415,8 +412,8 @@ describe('Sync API Integration Tests', () => {
           serverVersion: 2,
           clientData: { name: 'Client Data' },
           serverData: { name: 'Server Data' },
-          resolution: 'MANUAL'
-        }
+          resolution: 'MANUAL',
+        },
       });
 
       const response = await request(app)
@@ -453,8 +450,8 @@ describe('Sync API Integration Tests', () => {
           status: 'OPERATIONAL',
           path: '/resolve-asset',
           tags: [],
-          customFields: {}
-        }
+          customFields: {},
+        },
       });
 
       const conflict = await prisma.syncConflict.create({
@@ -465,13 +462,13 @@ describe('Sync API Integration Tests', () => {
           serverVersion: 2,
           clientData: { name: 'Client Name' },
           serverData: { name: 'Server Name' },
-          resolution: 'CLIENT_WINS'
-        }
+          resolution: 'CLIENT_WINS',
+        },
       });
 
       const resolveRequest = {
         conflictId: conflict.id,
-        resolution: 'CLIENT_WINS'
+        resolution: 'CLIENT_WINS',
       };
 
       await request(app)
@@ -482,7 +479,7 @@ describe('Sync API Integration Tests', () => {
 
       // Verify conflict was resolved
       const resolvedConflict = await prisma.syncConflict.findUnique({
-        where: { id: conflict.id }
+        where: { id: conflict.id },
       });
       expect(resolvedConflict?.resolvedBy).toBe(userId);
       expect(resolvedConflict?.resolvedAt).not.toBeNull();
@@ -491,7 +488,7 @@ describe('Sync API Integration Tests', () => {
     it('should reject invalid conflict resolution', async () => {
       const invalidRequest = {
         conflictId: 'invalid-uuid',
-        resolution: 'INVALID_RESOLUTION'
+        resolution: 'INVALID_RESOLUTION',
       };
 
       await request(app)
@@ -509,8 +506,8 @@ describe('Sync API Integration Tests', () => {
         data: {
           userId,
           deviceId,
-          deviceName: 'Test Device'
-        }
+          deviceName: 'Test Device',
+        },
       });
 
       // Create a failed sync item
@@ -524,12 +521,12 @@ describe('Sync API Integration Tests', () => {
           clientVersion: 1,
           status: 'FAILED',
           retryCount: 1,
-          errorMessage: 'Test error'
-        }
+          errorMessage: 'Test error',
+        },
       });
 
       const retryRequest = {
-        deviceId
+        deviceId,
       };
 
       const response = await request(app)
@@ -549,7 +546,7 @@ describe('Sync API Integration Tests', () => {
     it('should invalidate cache', async () => {
       const invalidateRequest = {
         entityType: 'asset',
-        entityIds: ['asset-123', 'asset-456']
+        entityIds: ['asset-123', 'asset-456'],
       };
 
       await request(app)

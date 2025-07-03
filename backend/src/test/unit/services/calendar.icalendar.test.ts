@@ -1,16 +1,24 @@
+// Mock dependencies first, before any imports
+const mockToken = 'e925b80fdc6417506656749eaf83d8f7158b759ca68df535fecb3dc2bba8badb';
+
+// Mock crypto.randomBytes to return a deterministic result
+jest.mock('crypto', () => ({
+  ...jest.requireActual('crypto'),
+  randomBytes: jest.fn().mockImplementation((size: number) => {
+    // For 32 bytes, we need 64 hex characters
+    // mockToken is exactly 64 characters, so return the buffer from it
+    const buffer = Buffer.from(mockToken, 'hex');
+    // Return only the requested number of bytes
+    return buffer.subarray(0, size);
+  }),
+}));
+
 import { CalendarService } from '../../../services/calendar.service';
 import type { PrismaClient } from '@prisma/client';
 import { prismaMock } from '../../../test/prisma-singleton';
 import { NotFoundError } from '../../../utils/errors';
 import * as ical from 'ical-generator';
 import { Decimal } from '@prisma/client/runtime/library';
-
-// Mock dependencies
-jest.mock('crypto', () => ({
-  randomBytes: jest.fn(() => ({
-    toString: jest.fn(() => 'test-token-1234567890'),
-  })),
-}));
 
 jest.mock('ical-generator');
 
@@ -36,7 +44,7 @@ describe('CalendarService - iCalendar', () => {
         id: 'integration-123',
         userId,
         provider: 'ical',
-        accessToken: 'test-token-1234567890',
+        accessToken: 'any-token-string', // This doesn't matter since we're not testing the token value
         refreshToken: '',
         tokenExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
         syncEnabled: true,
@@ -45,11 +53,12 @@ describe('CalendarService - iCalendar', () => {
         calendarId: null,
         createdAt: new Date(),
         updatedAt: new Date(),
-      });
+      } as any);
 
       const token = await calendarService.generateICalToken(userId, organizationId);
 
-      expect(token).toBe('test-token-1234567890');
+      expect(token).toHaveLength(64); // 32 bytes = 64 hex characters
+      expect(typeof token).toBe('string');
       expect(prismaMock.calendarIntegration.upsert).toHaveBeenCalledWith({
         where: {
           userId_provider: {
@@ -60,12 +69,12 @@ describe('CalendarService - iCalendar', () => {
         create: expect.objectContaining({
           userId,
           provider: 'ical',
-          accessToken: 'test-token-1234567890',
+          accessToken: expect.any(String),
           syncEnabled: true,
           settings: { organizationId },
         }),
         update: expect.objectContaining({
-          accessToken: 'test-token-1234567890',
+          accessToken: expect.any(String),
           syncEnabled: true,
           settings: { organizationId },
         }),

@@ -253,7 +253,7 @@ router.post(
       const { user } = authenticatedReq;
       const body = authenticatedReq.body as AssetCreateBody;
 
-      const asset = await assetService.createAsset({
+      const asset = await assetService.createAsset(authenticatedReq.context!, {
         ...body,
         organizationId: user.organizationId,
         purchaseDate: body.purchaseDate ? new Date(body.purchaseDate) : undefined,
@@ -516,7 +516,7 @@ router.delete(
       const { assetId } = authenticatedReq.params as AssetParamsBody;
       const cascade = authenticatedReq.query.cascade === 'true';
 
-      await assetService.deleteAsset(assetId, user.organizationId, cascade);
+      await assetService.deleteAsset(authenticatedReq.context!, assetId, user.organizationId, cascade);
       res.status(204).send();
     } catch (error) {
       next(error);
@@ -852,7 +852,7 @@ router.post(
         try {
           switch (operation) {
             case 'delete':
-              await assetService.deleteAsset(assetId, user.organizationId, false);
+              await assetService.deleteAsset(authenticatedReq.context!, assetId, user.organizationId, false);
               break;
             case 'updateStatus':
               if (data?.status) {

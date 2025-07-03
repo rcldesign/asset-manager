@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { validateRequest } from '../middleware/validation';
 import { dataImportService } from '../services/data-import.service';
@@ -7,12 +7,13 @@ import { asyncHandler } from '../utils/asyncHandler';
 import multer from 'multer';
 import path from 'path';
 import * as fs from 'fs/promises';
+import type { AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
+  destination: async (_req, _file, cb) => {
     const uploadPath = process.env.IMPORT_TEMP_PATH || path.join(process.cwd(), 'temp/imports');
     try {
       await fs.mkdir(uploadPath, { recursive: true });
@@ -21,21 +22,21 @@ const storage = multer.diskStorage({
       cb(error, uploadPath);
     }
   },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
   },
 });
 
-const upload = multer({ 
+const upload = multer({
   storage,
   limits: {
     fileSize: 50 * 1024 * 1024, // 50MB limit
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (_req, file, cb) => {
     const allowedExtensions = ['.csv', '.xlsx', '.xls', '.json'];
     const ext = path.extname(file.originalname).toLowerCase();
-    
+
     if (allowedExtensions.includes(ext)) {
       cb(null, true);
     } else {
@@ -53,7 +54,7 @@ const fieldMappingSchema = z.record(
       required: z.boolean().optional(),
       defaultValue: z.any().optional(),
     }),
-  ])
+  ]),
 );
 
 // Import options schema
@@ -73,20 +74,17 @@ router.post(
   validateRequest({
     body: importOptionsSchema,
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.file) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'No file uploaded',
       });
+      return;
     }
 
     try {
-      const result = await dataImportService.importAssets(
-        req.context!,
-        req.file.path,
-        req.body
-      );
+      const result = await dataImportService.importAssets(req.context!, req.file.path, req.body);
 
       // Clean up uploaded file
       await fs.unlink(req.file.path).catch(() => {});
@@ -100,7 +98,7 @@ router.post(
       await fs.unlink(req.file.path).catch(() => {});
       throw error;
     }
-  })
+  }),
 );
 
 // Task import endpoint
@@ -111,20 +109,17 @@ router.post(
   validateRequest({
     body: importOptionsSchema,
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.file) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'No file uploaded',
       });
+      return;
     }
 
     try {
-      const result = await dataImportService.importTasks(
-        req.context!,
-        req.file.path,
-        req.body
-      );
+      const result = await dataImportService.importTasks(req.context!, req.file.path, req.body);
 
       await fs.unlink(req.file.path).catch(() => {});
 
@@ -136,7 +131,7 @@ router.post(
       await fs.unlink(req.file.path).catch(() => {});
       throw error;
     }
-  })
+  }),
 );
 
 // Location import endpoint
@@ -147,20 +142,17 @@ router.post(
   validateRequest({
     body: importOptionsSchema,
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.file) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'No file uploaded',
       });
+      return;
     }
 
     try {
-      const result = await dataImportService.importLocations(
-        req.context!,
-        req.file.path,
-        req.body
-      );
+      const result = await dataImportService.importLocations(req.context!, req.file.path, req.body);
 
       await fs.unlink(req.file.path).catch(() => {});
 
@@ -172,7 +164,7 @@ router.post(
       await fs.unlink(req.file.path).catch(() => {});
       throw error;
     }
-  })
+  }),
 );
 
 // Get import template
@@ -187,9 +179,9 @@ router.get(
       format: z.enum(['csv', 'excel', 'json']).default('csv'),
     }),
   }),
-  asyncHandler(async (req, res) => {
-    const { type } = req.params;
-    const { format } = req.query;
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { type } = req.params as { type: string };
+    const { format } = req.query as { format: string };
 
     let template: any;
     let filename: string;
@@ -206,7 +198,7 @@ router.get(
           modelNumber: 'MODEL-001',
           serialNumber: 'SN-001',
           purchaseDate: '2024-01-01',
-          purchasePrice: 1000.00,
+          purchasePrice: 1000.0,
           description: 'Example asset description',
           locationId: '',
           tags: 'tag1,tag2',
@@ -221,7 +213,7 @@ router.get(
           dueDate: '2024-12-31',
           status: 'PLANNED',
           priority: 'MEDIUM',
-          estimatedCost: 100.00,
+          estimatedCost: 100.0,
           estimatedMinutes: 60,
           assetId: '',
           isPhotoRequired: false,
@@ -236,7 +228,7 @@ router.get(
       ],
     };
 
-    template = templates[type];
+    template = templates[type as keyof typeof templates];
 
     switch (format) {
       case 'json':
@@ -271,7 +263,7 @@ router.get(
         res.send(buffer);
         break;
     }
-  })
+  }),
 );
 
 // Get field mapping suggestions
@@ -285,24 +277,25 @@ router.post(
       format: z.enum(['csv', 'excel', 'json']),
     }),
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     if (!req.file) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'No file uploaded',
       });
+      return;
     }
 
     try {
       // Read the first few rows to analyze structure
       const data = await dataImportService['parseFile'](req.file.path, req.body.format);
       const sampleData = data.slice(0, 5);
-      
+
       // Clean up uploaded file
       await fs.unlink(req.file.path).catch(() => {});
 
       if (sampleData.length === 0) {
-        return res.json({
+        res.json({
           success: true,
           data: {
             sourceFields: [],
@@ -310,56 +303,57 @@ router.post(
             sampleData: [],
           },
         });
+        return;
       }
 
       const sourceFields = Object.keys(sampleData[0]);
-      
+
       // Suggest mappings based on field names
       const suggestedMappings: any = {};
       const commonMappings: Record<string, Record<string, string>> = {
         assets: {
           'asset name': 'name',
-          'asset_name': 'name',
-          'type': 'category',
+          asset_name: 'name',
+          type: 'category',
           'asset type': 'category',
-          'asset_type': 'category',
-          'serial': 'serialNumber',
+          asset_type: 'category',
+          serial: 'serialNumber',
           'serial number': 'serialNumber',
-          'serial_number': 'serialNumber',
+          serial_number: 'serialNumber',
           'purchase date': 'purchaseDate',
-          'purchase_date': 'purchaseDate',
-          'price': 'purchasePrice',
-          'cost': 'purchasePrice',
-          'warranty': 'warrantyExpiry',
+          purchase_date: 'purchaseDate',
+          price: 'purchasePrice',
+          cost: 'purchasePrice',
+          warranty: 'warrantyExpiry',
           'warranty expiry': 'warrantyExpiry',
-          'warranty_expiry': 'warrantyExpiry',
+          warranty_expiry: 'warrantyExpiry',
         },
         tasks: {
           'task name': 'title',
-          'task_name': 'title',
-          'name': 'title',
-          'due': 'dueDate',
+          task_name: 'title',
+          name: 'title',
+          due: 'dueDate',
           'due date': 'dueDate',
-          'due_date': 'dueDate',
-          'deadline': 'dueDate',
-          'desc': 'description',
+          due_date: 'dueDate',
+          deadline: 'dueDate',
+          desc: 'description',
           'estimated time': 'estimatedMinutes',
-          'estimated_time': 'estimatedMinutes',
-          'time': 'estimatedMinutes',
+          estimated_time: 'estimatedMinutes',
+          time: 'estimatedMinutes',
         },
         locations: {
           'location name': 'name',
-          'location_name': 'name',
-          'parent': 'parentId',
+          location_name: 'name',
+          parent: 'parentId',
           'parent location': 'parentId',
-          'parent_location': 'parentId',
-          'desc': 'description',
+          parent_location: 'parentId',
+          desc: 'description',
         },
       };
 
       const targetMappings = commonMappings[req.body.targetType] || {};
-      
-      sourceFields.forEach(field => {
+
+      sourceFields.forEach((field) => {
         const lowerField = field.toLowerCase();
         if (targetMappings[lowerField]) {
           suggestedMappings[field] = targetMappings[lowerField];
@@ -381,7 +375,7 @@ router.post(
       await fs.unlink(req.file.path).catch(() => {});
       throw error;
     }
-  })
+  }),
 );
 
 export default router;

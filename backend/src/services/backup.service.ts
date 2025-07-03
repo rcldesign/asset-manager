@@ -10,7 +10,7 @@ import { pipeline } from 'stream/promises';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { prisma } from '../lib/prisma';
-import type { User } from '@prisma/client';
+import type { User, PrismaClient } from '@prisma/client';
 import { NotFoundError, ForbiddenError, ValidationError } from '../utils/errors';
 import { webhookService } from './webhook.service';
 import type { BackupCreatedPayload, BackupRestoredPayload } from '../types/webhook-payloads';
@@ -62,11 +62,13 @@ export interface BackupListItem {
  * Supports local Docker volume and SMB file storage
  */
 export class BackupService {
+  private prisma: PrismaClient;
   private readonly backupDir: string;
   private readonly tempDir: string;
   private readonly appVersion = '1.0.0'; // Should be read from package.json in real implementation
 
-  constructor() {
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
     this.backupDir = path.join(config.uploadDir, '..', 'backups');
     this.tempDir = path.join(config.uploadDir, '..', 'temp');
   }
@@ -85,7 +87,7 @@ export class BackupService {
   async createBackup(
     user: User,
     organizationId: string,
-    options: BackupOptions = {}
+    options: BackupOptions = {},
   ): Promise<BackupMetadata> {
     const {
       type = 'full',
@@ -118,15 +120,15 @@ export class BackupService {
         checksum: '',
         databaseType: config.useEmbeddedDb ? 'embedded' : 'external',
         fileStorageType: config.fileStorageType,
-        includesDatabase,
-        includesFiles,
+        includesDatabase: includeDatabase,
+        includesFiles: includeFiles,
         description,
       };
 
       // Save metadata
       await fs.writeFile(
         path.join(tempBackupDir, 'metadata.json'),
-        JSON.stringify(metadata, null, 2)
+        JSON.stringify(metadata, null, 2),
       );
 
       // Backup database if requested
@@ -154,8 +156,8 @@ export class BackupService {
       await archive.finalize();
 
       // Wait for archive to finish
-      await new Promise((resolve, reject) => {
-        output.on('close', resolve);
+      await new Promise<void>((resolve, reject) => {
+        output.on('close', () => resolve());
         output.on('error', reject);
       });
 
@@ -167,7 +169,7 @@ export class BackupService {
       // Update metadata with final values
       await fs.writeFile(
         path.join(tempBackupDir, 'metadata.json'),
-        JSON.stringify(metadata, null, 2)
+        JSON.stringify(metadata, null, 2),
       );
 
       // Clean up temp directory
@@ -183,16 +185,16 @@ export class BackupService {
       try {
         // Get entity counts
         const [assetCount, taskCount, userCount, attachmentCount] = await Promise.all([
-          prisma.asset.count({ where: { organizationId } }),
-          prisma.task.count({ where: { organizationId } }),
-          prisma.user.count({ where: { organizationId } }),
-          prisma.taskAttachment.count({
+          this.prisma.asset.count({ where: { organizationId } }),
+          this.prisma.task.count({ where: { organizationId } }),
+          this.prisma.user.count({ where: { organizationId } }),
+          this.prisma.taskAttachment.count({
             where: {
               task: {
-                organizationId
-              }
-            }
-          })
+                organizationId,
+              },
+            },
+          }),
         ]);
 
         const payload: BackupCreatedPayload = {
@@ -201,32 +203,32 @@ export class BackupService {
             type,
             size: metadata.size,
             location: backupPath,
-            createdAt: timestamp
+            createdAt: timestamp,
           },
           initiatedBy: {
             id: user.id,
             email: user.email,
-            name: user.name,
-            role: user.role
+            name: user.fullName || user.email,
+            role: user.role,
           },
           includedEntities: {
             assets: assetCount,
             tasks: taskCount,
             users: userCount,
-            attachments: attachmentCount
-          }
+            attachments: attachmentCount,
+          },
         };
 
         const enhancedEvent = await webhookService.createEnhancedEvent(
           'backup.created',
           organizationId,
           user.id,
-          payload
+          payload,
         );
 
         await webhookService.emitEvent(enhancedEvent);
       } catch (error) {
-        logger.error('Failed to emit backup webhook event:', error);
+        logger.error('Failed to emit backup webhook event:', error as Error);
       }
 
       return metadata;
@@ -234,8 +236,8 @@ export class BackupService {
       // Clean up on error
       await fs.rm(tempBackupDir, { recursive: true, force: true }).catch(() => {});
       await fs.unlink(backupPath).catch(() => {});
-      
-      logger.error('Backup creation failed', { error, backupId });
+
+      logger.error('Backup creation failed', error as Error, { backupId });
       throw error;
     }
   }
@@ -249,21 +251,25 @@ export class BackupService {
     if (config.useEmbeddedDb) {
       // For embedded database, use pg_dump with the embedded connection
       const pgDumpCommand = `pg_dump "${config.databaseUrl}" > "${dbBackupPath}"`;
-      
+
       try {
         await execAsync(pgDumpCommand);
       } catch (error) {
-        throw new Error(`Database backup failed: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(
+          `Database backup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     } else {
       // For external database, parse connection string and use pg_dump
       const dbUrl = new URL(config.databaseUrl || '');
       const pgDumpCommand = `PGPASSWORD="${dbUrl.password}" pg_dump -h "${dbUrl.hostname}" -p "${dbUrl.port}" -U "${dbUrl.username}" -d "${dbUrl.pathname.slice(1)}" > "${dbBackupPath}"`;
-      
+
       try {
         await execAsync(pgDumpCommand);
       } catch (error) {
-        throw new Error(`Database backup failed: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(
+          `Database backup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
@@ -282,7 +288,7 @@ export class BackupService {
     if (config.fileStorageType === 'local') {
       // For local storage, copy files from upload directory
       const orgUploadDir = path.join(config.uploadDir, organizationId);
-      
+
       try {
         await fs.access(orgUploadDir);
         // Copy organization's files
@@ -299,7 +305,7 @@ SMB Share: ${config.smbHost}/${config.smbShare}
 Organization Path: ${organizationId}/
 
 Please use your existing SMB backup infrastructure to backup these files.`;
-      
+
       await fs.writeFile(smbInfoPath, smbInfo);
     }
   }
@@ -319,10 +325,10 @@ Please use your existing SMB backup infrastructure to backup these files.`;
       try {
         const backupPath = path.join(this.backupDir, file);
         const stats = await fs.stat(backupPath);
-        
+
         // Extract metadata from the backup
         const metadata = await this.extractMetadata(backupPath);
-        
+
         if (metadata.organizationId === organizationId) {
           backups.push({
             id: metadata.id,
@@ -351,16 +357,12 @@ Please use your existing SMB backup infrastructure to backup these files.`;
     backupId: string,
     user: User,
     organizationId: string,
-    options: RestoreOptions = {}
+    options: RestoreOptions = {},
   ): Promise<void> {
-    const {
-      validateChecksum = true,
-      rollbackOnFailure = true,
-      dryRun = false,
-    } = options;
+    const { validateChecksum = true, rollbackOnFailure = true, dryRun = false } = options;
 
     const backupPath = path.join(this.backupDir, `backup-${backupId}.zip`);
-    
+
     // Check if backup exists
     try {
       await fs.access(backupPath);
@@ -370,7 +372,7 @@ Please use your existing SMB backup infrastructure to backup these files.`;
 
     // Extract and validate metadata
     const metadata = await this.extractMetadata(backupPath);
-    
+
     if (metadata.organizationId !== organizationId) {
       throw new ForbiddenError('Backup belongs to different organization');
     }
@@ -415,21 +417,21 @@ Please use your existing SMB backup infrastructure to backup these files.`;
         }
 
         logger.info('Restore completed successfully', { backupId });
-        
+
         // Emit webhook event for backup restoration
         try {
           // Get restored entity counts
           const [assetCount, taskCount, userCount, attachmentCount] = await Promise.all([
-            prisma.asset.count({ where: { organizationId } }),
-            prisma.task.count({ where: { organizationId } }),
-            prisma.user.count({ where: { organizationId } }),
-            prisma.taskAttachment.count({
+            this.prisma.asset.count({ where: { organizationId } }),
+            this.prisma.task.count({ where: { organizationId } }),
+            this.prisma.user.count({ where: { organizationId } }),
+            this.prisma.taskAttachment.count({
               where: {
                 task: {
-                  organizationId
-                }
-              }
-            })
+                  organizationId,
+                },
+              },
+            }),
           ]);
 
           const payload: BackupRestoredPayload = {
@@ -437,37 +439,37 @@ Please use your existing SMB backup infrastructure to backup these files.`;
               id: backupId,
               type: metadata.type,
               restoredFrom: metadata.timestamp,
-              restoredAt: new Date()
+              restoredAt: new Date(),
             },
             restoredBy: {
               id: user.id,
               email: user.email,
-              name: user.name,
-              role: user.role
+              name: user.fullName || user.email,
+              role: user.role,
             },
             restoredEntities: {
               assets: assetCount,
               tasks: taskCount,
               users: userCount,
-              attachments: attachmentCount
-            }
+              attachments: attachmentCount,
+            },
           };
 
           const enhancedEvent = await webhookService.createEnhancedEvent(
             'backup.restored',
             organizationId,
             user.id,
-            payload
+            payload,
           );
 
           await webhookService.emitEvent(enhancedEvent);
         } catch (error) {
-          logger.error('Failed to emit restore webhook event:', error);
+          logger.error('Failed to emit restore webhook event:', error as Error);
         }
       } catch (error) {
         // Rollback if enabled
         if (rollbackOnFailure && checkpointId) {
-          logger.error('Restore failed, rolling back', { error, backupId });
+          logger.error('Restore failed, rolling back', error as Error, { backupId });
           await this.rollbackFromCheckpoint(checkpointId, organizationId);
         }
         throw error;
@@ -483,7 +485,7 @@ Please use your existing SMB backup infrastructure to backup these files.`;
    */
   async deleteBackup(backupId: string, organizationId: string): Promise<void> {
     const backupPath = path.join(this.backupDir, `backup-${backupId}.zip`);
-    
+
     // Check if backup exists and belongs to organization
     try {
       const metadata = await this.extractMetadata(backupPath);
@@ -505,7 +507,7 @@ Please use your existing SMB backup infrastructure to backup these files.`;
   private async calculateChecksum(filePath: string): Promise<string> {
     const hash = createHash('sha256');
     const stream = createReadStream(filePath);
-    
+
     await pipeline(stream, hash);
     return hash.digest('hex');
   }
@@ -515,11 +517,12 @@ Please use your existing SMB backup infrastructure to backup these files.`;
    */
   private async extractMetadata(backupPath: string): Promise<BackupMetadata> {
     return new Promise((resolve, reject) => {
-      const stream = createReadStream(backupPath)
-        .pipe(unzipper.ParseOne(/metadata\.json$/));
-      
+      const stream = createReadStream(backupPath).pipe(unzipper.ParseOne(/metadata\.json$/));
+
       let data = '';
-      stream.on('data', (chunk) => { data += chunk; });
+      stream.on('data', (chunk: any) => {
+        data += chunk;
+      });
       stream.on('end', () => {
         try {
           resolve(JSON.parse(data));
@@ -535,10 +538,7 @@ Please use your existing SMB backup infrastructure to backup these files.`;
    * Extract backup to directory
    */
   private async extractBackup(backupPath: string, targetDir: string): Promise<void> {
-    await pipeline(
-      createReadStream(backupPath),
-      unzipper.Extract({ path: targetDir })
-    );
+    await pipeline(createReadStream(backupPath), unzipper.Extract({ path: targetDir }));
   }
 
   /**
@@ -565,11 +565,11 @@ Please use your existing SMB backup infrastructure to backup these files.`;
    */
   private async restoreDatabase(restoreDir: string): Promise<void> {
     const dbBackupPath = path.join(restoreDir, 'database.sql.gz');
-    
+
     // Decompress the SQL file
     const decompressCommand = `gunzip "${dbBackupPath}"`;
     await execAsync(decompressCommand);
-    
+
     const sqlPath = path.join(restoreDir, 'database.sql');
 
     if (config.useEmbeddedDb) {
@@ -593,7 +593,7 @@ Please use your existing SMB backup infrastructure to backup these files.`;
     if (config.fileStorageType === 'local') {
       const orgBackupDir = path.join(filesBackupDir, organizationId);
       const orgUploadDir = path.join(config.uploadDir, organizationId);
-      
+
       // Check if backup contains files
       try {
         await fs.access(orgBackupDir);
@@ -611,7 +611,7 @@ Please use your existing SMB backup infrastructure to backup these files.`;
   /**
    * Create a restore checkpoint (simplified version)
    */
-  private async createRestoreCheckpoint(organizationId: string): Promise<string> {
+  private async createRestoreCheckpoint(_organizationId: string): Promise<string> {
     // In a real implementation, this would create a database snapshot
     // For now, we'll just create a quick backup
     const checkpointId = `checkpoint-${Date.now()}`;
@@ -623,7 +623,10 @@ Please use your existing SMB backup infrastructure to backup these files.`;
   /**
    * Rollback from checkpoint
    */
-  private async rollbackFromCheckpoint(checkpointId: string, organizationId: string): Promise<void> {
+  private async rollbackFromCheckpoint(
+    checkpointId: string,
+    _organizationId: string,
+  ): Promise<void> {
     logger.info('Rolling back from checkpoint', { checkpointId });
     // Implementation would go here
   }

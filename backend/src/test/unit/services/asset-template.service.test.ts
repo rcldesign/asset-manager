@@ -1,7 +1,9 @@
-import { AssetTemplateService } from '../../../services/asset-template.service';
 import { AppError, NotFoundError, ConflictError } from '../../../utils/errors';
 import { AssetCategory } from '@prisma/client';
-import { prismaMock } from '../../prisma-singleton';
+
+// Import modules
+import { AssetTemplateService } from '../../../services/asset-template.service';
+import { prismaMock } from '../../../test/prisma-singleton';
 
 describe('AssetTemplateService', () => {
   let assetTemplateService: AssetTemplateService;
@@ -524,7 +526,7 @@ describe('AssetTemplateService', () => {
     };
 
     it('should validate correct values', async () => {
-      prismaMock.assetTemplate.findUnique.mockResolvedValue(mockTemplate as any);
+      prismaMock.assetTemplate.findFirst.mockResolvedValue(mockTemplate as any);
 
       const result = await assetTemplateService.validateCustomFieldValues(
         mockTemplateId,
@@ -541,7 +543,7 @@ describe('AssetTemplateService', () => {
     });
 
     it('should detect validation errors', async () => {
-      prismaMock.assetTemplate.findUnique.mockResolvedValue(mockTemplate as any);
+      prismaMock.assetTemplate.findFirst.mockResolvedValue(mockTemplate as any);
 
       const result = await assetTemplateService.validateCustomFieldValues(
         mockTemplateId,
@@ -559,7 +561,7 @@ describe('AssetTemplateService', () => {
 
     it('should handle empty schema', async () => {
       const emptySchemaTemplate = { id: mockTemplateId, customFields: {} };
-      prismaMock.assetTemplate.findUnique.mockResolvedValue(emptySchemaTemplate as any);
+      prismaMock.assetTemplate.findFirst.mockResolvedValue(emptySchemaTemplate as any);
 
       const result = await assetTemplateService.validateCustomFieldValues(
         mockTemplateId,
@@ -574,7 +576,7 @@ describe('AssetTemplateService', () => {
     });
 
     it('should throw error if template not found', async () => {
-      prismaMock.assetTemplate.findUnique.mockResolvedValue(null);
+      prismaMock.assetTemplate.findFirst.mockResolvedValue(null);
 
       await expect(
         assetTemplateService.validateCustomFieldValues(mockTemplateId, {}, mockOrganizationId),

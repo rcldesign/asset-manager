@@ -1,4 +1,4 @@
-import type { User, UserRole, Prisma } from '@prisma/client';
+import type { User, UserRole, Prisma, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import { prisma } from '../lib/prisma';
@@ -32,6 +32,11 @@ export interface UpdateUserData {
  * @class UserService
  */
 export class UserService {
+  private prisma: PrismaClient;
+
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+  }
   /**
    * Create a new user in an organization.
    * Validates email uniqueness and organization existence.
@@ -53,7 +58,7 @@ export class UserService {
     const { email, password, organizationId, ...userData } = data;
 
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
+    const existingUser = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
     });
 
@@ -62,7 +67,7 @@ export class UserService {
     }
 
     // Verify organization exists
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id: organizationId },
     });
 
@@ -77,7 +82,7 @@ export class UserService {
     }
 
     // Create user
-    const user = await prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         email: email.toLowerCase(),
         passwordHash,
@@ -103,7 +108,7 @@ export class UserService {
    * const user = await userService.getUserById('user-123');
    */
   async getUserById(id: string): Promise<User | null> {
-    return prisma.user.findUnique({
+    return this.prisma.user.findUnique({
       where: { id },
       include: {
         organization: true,
@@ -122,7 +127,7 @@ export class UserService {
    * const user = await userService.findByEmail('john@example.com');
    */
   async findByEmail(email: string): Promise<User | null> {
-    return prisma.user.findUnique({
+    return this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
       include: {
         organization: true,
@@ -168,13 +173,13 @@ export class UserService {
     };
 
     const [users, total] = await Promise.all([
-      prisma.user.findMany({
+      this.prisma.user.findMany({
         where,
         skip: options?.skip,
         take: options?.take,
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.user.count({ where }),
+      this.prisma.user.count({ where }),
     ]);
 
     // Apply permission-based attribute filtering if context provided
@@ -246,7 +251,7 @@ export class UserService {
 
     // Check if email is being changed and if it's already taken
     if (data.email) {
-      const existingUser = await prisma.user.findFirst({
+      const existingUser = await this.prisma.user.findFirst({
         where: {
           email: data.email.toLowerCase(),
           NOT: { id },
@@ -258,7 +263,7 @@ export class UserService {
       }
     }
 
-    const user = await prisma.user.update({
+    const user = await this.prisma.user.update({
       where: { id },
       data: {
         ...data,
@@ -310,7 +315,7 @@ export class UserService {
     currentPassword: string,
     newPassword: string,
   ): Promise<void> {
-    const user = await prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
 
@@ -332,7 +337,7 @@ export class UserService {
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
     // Update password
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { passwordHash: newPasswordHash },
     });
@@ -404,7 +409,7 @@ export class UserService {
    * @private
    */
   async verifyPassword(email: string, password: string): Promise<User | null> {
-    const user = await prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
       include: {
         organization: true,
@@ -452,7 +457,7 @@ export class UserService {
       }
     }
 
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id },
       data: { isActive: false },
     });
@@ -488,7 +493,7 @@ export class UserService {
     const totpSecret = generateTOTPSecret(user.email, 'DumbAssets Enhanced');
 
     // Store the temporary secret in the database (not yet enabled)
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { totpSecret: totpSecret.secret },
     });
@@ -515,7 +520,7 @@ export class UserService {
    */
   async enableTwoFactor(userId: string, totpToken: string, timeForTesting?: number): Promise<void> {
     // Get the user and their temporary TOTP secret
-    const user = await prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
 
@@ -534,7 +539,7 @@ export class UserService {
     }
 
     // Enable 2FA for the user
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { totpEnabled: true },
     });
@@ -559,7 +564,7 @@ export class UserService {
     timeForTesting?: number,
   ): Promise<void> {
     // Get the user and their TOTP secret
-    const user = await prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
 
@@ -578,7 +583,7 @@ export class UserService {
     }
 
     // Disable 2FA and remove the secret
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: {
         totpEnabled: false,
@@ -598,7 +603,7 @@ export class UserService {
    * await userService.verifyEmail('user-123');
    */
   async verifyEmail(userId: string): Promise<void> {
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { emailVerified: true },
     });
@@ -648,7 +653,7 @@ export class UserService {
     const hashedToken = createHash('sha256').update(token).digest('hex');
     const tokenPrefix = token.substring(0, 8);
 
-    const apiToken = await prisma.apiToken.create({
+    const apiToken = await this.prisma.apiToken.create({
       data: {
         userId,
         name: data.name,
@@ -682,7 +687,7 @@ export class UserService {
     const hashedToken = createHash('sha256').update(token).digest('hex');
     const tokenPrefix = token.substring(0, 8);
 
-    await prisma.apiToken.create({
+    await this.prisma.apiToken.create({
       data: {
         userId,
         name,
@@ -713,7 +718,7 @@ export class UserService {
     const hashedToken = createHash('sha256').update(token).digest('hex');
 
     // First try SHA-256 hash (new method)
-    let apiToken = await prisma.apiToken.findFirst({
+    let apiToken = await this.prisma.apiToken.findFirst({
       where: {
         token: hashedToken,
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
@@ -732,7 +737,7 @@ export class UserService {
       const tokenPrefix = token.substring(0, 8);
 
       // First try to find tokens with matching prefix (performance optimization)
-      let candidateTokens = await prisma.apiToken.findMany({
+      let candidateTokens = await this.prisma.apiToken.findMany({
         where: {
           tokenPrefix,
           OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
@@ -748,7 +753,7 @@ export class UserService {
 
       // If no prefix matches found, fall back to all active tokens (for tokens without prefix)
       if (candidateTokens.length === 0) {
-        candidateTokens = await prisma.apiToken.findMany({
+        candidateTokens = await this.prisma.apiToken.findMany({
           where: {
             tokenPrefix: null, // Only check legacy tokens without prefix
             OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
@@ -770,7 +775,7 @@ export class UserService {
           if (isValid) {
             apiToken = dbToken;
             // Automatically migrate legacy tokens to new format
-            await prisma.apiToken.update({
+            await this.prisma.apiToken.update({
               where: { id: dbToken.id },
               data: {
                 token: hashedToken,
@@ -791,7 +796,7 @@ export class UserService {
     }
 
     // Update last used timestamp
-    await prisma.apiToken.update({
+    await this.prisma.apiToken.update({
       where: { id: apiToken.id },
       data: { lastUsed: new Date() },
     });
@@ -833,7 +838,7 @@ export class UserService {
     }
 
     // First check if the token exists and belongs to the user
-    const existingToken = await prisma.apiToken.findUnique({
+    const existingToken = await this.prisma.apiToken.findUnique({
       where: {
         id: tokenId,
       },
@@ -844,7 +849,7 @@ export class UserService {
     }
 
     // Now delete the specific token
-    await prisma.apiToken.delete({
+    await this.prisma.apiToken.delete({
       where: {
         id: tokenId,
       },
@@ -893,7 +898,7 @@ export class UserService {
       }
     }
 
-    const tokens = await prisma.apiToken.findMany({
+    const tokens = await this.prisma.apiToken.findMany({
       where: { userId },
       select: {
         id: true,

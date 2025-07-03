@@ -5,12 +5,12 @@ import { NotFoundError, ValidationError } from '../utils/errors';
 import { NotificationService } from './notification.service';
 import { ActivityStreamService } from './activity-stream.service';
 import { webhookService } from './webhook.service';
-import type { 
+import type {
   TaskAssignedPayload,
   TaskCompletedPayload,
   TaskOverduePayload,
   MaintenanceStartedPayload,
-  MaintenanceCompletedPayload 
+  MaintenanceCompletedPayload,
 } from '../types/webhook-payloads';
 
 interface ChecklistItem {
@@ -158,16 +158,16 @@ export class TaskEnhancementService {
 
     // Emit webhook event for task assignment
     try {
-      const assignedUsers = task.assignments.map(a => ({
+      const assignedUsers = task.assignments.map((a) => ({
         id: a.user.id,
         email: a.user.email,
         name: a.user.name,
-        role: a.user.role
+        role: a.user.role,
       }));
 
       const assignedByUser = await this.prisma.user.findUnique({
         where: { id: assignedBy },
-        select: { id: true, email: true, name: true, role: true }
+        select: { id: true, email: true, name: true, role: true },
       });
 
       if (assignedByUser) {
@@ -181,22 +181,22 @@ export class TaskEnhancementService {
             estimatedMinutes: task.estimatedMinutes || undefined,
             actualMinutes: task.actualMinutes || undefined,
             actualCost: task.actualCost ? task.actualCost.toNumber() : undefined,
-            assetId: task.assetId || undefined
+            assetId: task.assetId || undefined,
           },
           assignedTo: assignedUsers,
           assignedBy: {
             id: assignedByUser.id,
             email: assignedByUser.email,
             name: assignedByUser.name,
-            role: assignedByUser.role
-          }
+            role: assignedByUser.role,
+          },
         };
 
         const enhancedEvent = await webhookService.createEnhancedEvent(
           'task.assigned',
           organizationId,
           assignedBy,
-          payload
+          payload,
         );
 
         await webhookService.emitEvent(enhancedEvent);
@@ -244,6 +244,7 @@ export class TaskEnhancementService {
           description: subtask.description,
           dueDate: subtask.dueDate,
           priority: subtask.priority || 'MEDIUM',
+          category: parentTask.category,
           estimatedMinutes: subtask.estimatedMinutes,
           subtaskOrder: subtask.order || i,
           assetId: parentTask.assetId,
@@ -568,16 +569,20 @@ export class TaskEnhancementService {
 
       const completedByUser = await this.prisma.user.findUnique({
         where: { id: completedBy },
-        select: { id: true, email: true, name: true, role: true }
+        select: { id: true, email: true, name: true, role: true },
       });
 
       if (taskDetails && completedByUser) {
-        const checklistCount = taskDetails.checklist ? 
-          (Array.isArray(taskDetails.checklist) ? taskDetails.checklist.length : 0) : 0;
-        const checklistCompleted = taskDetails.checklist ? 
-          (Array.isArray(taskDetails.checklist) ? 
-            (taskDetails.checklist as ChecklistItem[]).filter(item => item.isCompleted).length : 0
-          ) : 0;
+        const checklistCount = taskDetails.checklist
+          ? Array.isArray(taskDetails.checklist)
+            ? taskDetails.checklist.length
+            : 0
+          : 0;
+        const checklistCompleted = taskDetails.checklist
+          ? Array.isArray(taskDetails.checklist)
+            ? (taskDetails.checklist as ChecklistItem[]).filter((item) => item.isCompleted).length
+            : 0
+          : 0;
 
         const payload: TaskCompletedPayload = {
           task: {
@@ -592,35 +597,39 @@ export class TaskEnhancementService {
             assetId: taskDetails.assetId || undefined,
             assetName: taskDetails.asset?.name,
             scheduleId: taskDetails.scheduleId || undefined,
-            scheduleName: taskDetails.schedule?.name
+            scheduleName: taskDetails.schedule?.name,
           },
           completedBy: {
             id: completedByUser.id,
             email: completedByUser.email,
             name: completedByUser.name,
-            role: completedByUser.role
+            role: completedByUser.role,
           },
           completionDetails: {
             actualMinutes: actualMinutes || undefined,
             actualCost: actualCost || undefined,
             notes: notes || undefined,
-            checklistCompletion: checklistCount > 0 ? 
-              Math.round((checklistCompleted / checklistCount) * 100) : undefined,
-            attachments: taskDetails.attachments.length
+            checklistCompletion:
+              checklistCount > 0
+                ? Math.round((checklistCompleted / checklistCount) * 100)
+                : undefined,
+            attachments: taskDetails.attachments.length,
           },
-          asset: taskDetails.asset ? {
-            id: taskDetails.asset.id,
-            name: taskDetails.asset.name,
-            category: taskDetails.asset.category,
-            status: taskDetails.asset.status
-          } : undefined
+          asset: taskDetails.asset
+            ? {
+                id: taskDetails.asset.id,
+                name: taskDetails.asset.name,
+                category: taskDetails.asset.category,
+                status: taskDetails.asset.status,
+              }
+            : undefined,
         };
 
         const enhancedEvent = await webhookService.createEnhancedEvent(
           'task.completed',
           organizationId,
           completedBy,
-          payload
+          payload,
         );
 
         await webhookService.emitEvent(enhancedEvent);
@@ -633,14 +642,14 @@ export class TaskEnhancementService {
             asset: payload.asset!,
             duration: actualMinutes || 0,
             cost: actualCost || undefined,
-            notes: notes || undefined
+            notes: notes || undefined,
           };
 
           const maintenanceEvent = await webhookService.createEnhancedEvent(
             'maintenance.completed',
             organizationId,
             completedBy,
-            maintenancePayload
+            maintenancePayload,
           );
 
           await webhookService.emitEvent(maintenanceEvent);

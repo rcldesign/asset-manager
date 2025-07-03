@@ -1,6 +1,6 @@
 import { webhookService } from '../../../services/webhook.service';
 import { prisma } from '../../../lib/prisma';
-import { WebhookEventPayloadMap } from '../../../types/webhook-payloads';
+import type { WebhookEventPayloadMap } from '../../../types/webhook-payloads';
 
 jest.mock('../../../lib/prisma', () => ({
   prisma: {
@@ -36,7 +36,7 @@ describe('Webhook Enhancements', () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue({
         id: 'user-123',
         email: 'test@example.com',
-        name: 'Test User',
+        fullName: 'Test User',
         role: 'MANAGER',
       });
 
@@ -45,7 +45,7 @@ describe('Webhook Enhancements', () => {
           id: 'asset-123',
           name: 'Test Asset',
           category: 'EQUIPMENT',
-          status: 'ACTIVE',
+          status: 'OPERATIONAL',
         },
       };
 
@@ -53,7 +53,7 @@ describe('Webhook Enhancements', () => {
         'asset.created',
         'org-123',
         'user-123',
-        payload
+        payload,
       );
 
       expect(event).toMatchObject({
@@ -96,8 +96,8 @@ describe('Webhook Enhancements', () => {
             name: 'Test Asset',
             category: 'EQUIPMENT',
             status: 'OPERATIONAL',
-          }
-        })
+          },
+        }),
       ).rejects.toThrow('Organization or user not found for webhook event');
     });
 
@@ -115,8 +115,8 @@ describe('Webhook Enhancements', () => {
             name: 'Test Asset',
             category: 'EQUIPMENT',
             status: 'OPERATIONAL',
-          }
-        })
+          },
+        }),
       ).rejects.toThrow('Organization or user not found for webhook event');
     });
   });
@@ -150,7 +150,7 @@ describe('Webhook Enhancements', () => {
         eventType as any,
         'org-123',
         'user-123',
-        {} as any
+        {} as any,
       );
 
       expect(event.type).toBe(eventType);
@@ -189,7 +189,7 @@ describe('Webhook Enhancements', () => {
           role: 'MANAGER',
         },
         changes: {
-          oldValue: { status: 'ACTIVE' },
+          oldValue: { status: 'OPERATIONAL' },
           newValue: { status: 'MAINTENANCE' },
         },
         affectedEntity: {
@@ -203,7 +203,7 @@ describe('Webhook Enhancements', () => {
         'audit.created',
         'org-123',
         'user-123',
-        payload
+        payload,
       );
 
       expect(event.data).toEqual(payload);
@@ -237,7 +237,7 @@ describe('Webhook Enhancements', () => {
         'sync.completed',
         'org-123',
         'user-123',
-        payload
+        payload,
       );
 
       expect(event.data).toEqual(payload);
@@ -264,7 +264,7 @@ describe('Webhook Enhancements', () => {
         'gdpr.export_requested',
         'org-123',
         'user-123',
-        payload
+        payload,
       );
 
       expect(event.data).toEqual(payload);
@@ -343,7 +343,7 @@ describe('Webhook Enhancements', () => {
             category: 'EQUIPMENT',
             status: 'OPERATIONAL',
           },
-        }
+        },
       );
 
       await webhookService.emitEvent(enhancedEvent);

@@ -1,5 +1,6 @@
-import { DataExportService, ExportOptions, UserDataExport } from '../../../services/data-export.service';
-import { IRequestContext } from '../../../interfaces/context.interface';
+import type { ExportOptions } from '../../../services/data-export.service';
+import { DataExportService, UserDataExport } from '../../../services/data-export.service';
+import type { IRequestContext } from '../../../interfaces/context.interface';
 import { prisma } from '../../../lib/prisma';
 import { AuditService } from '../../../services/audit.service';
 import { ActionType } from '@prisma/client';
@@ -137,7 +138,7 @@ describe('DataExportService - Comprehensive Tests', () => {
 
       expect(fs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('.json'),
-        expect.stringContaining('"Test Asset 1"')
+        expect.stringContaining('"Test Asset 1"'),
       );
     });
 
@@ -207,7 +208,7 @@ describe('DataExportService - Comprehensive Tests', () => {
       };
 
       await expect(service.exportAssets(mockContext, options)).rejects.toThrow(
-        'Unsupported export format: xml'
+        'Unsupported export format: xml',
       );
     });
 
@@ -385,13 +386,9 @@ describe('DataExportService - Comprehensive Tests', () => {
       organizationId: 'org-123',
     };
 
-    const mockTaskAssignments = [
-      { id: 'assignment-1', taskId: 'task-1', userId: 'user-123' },
-    ];
+    const mockTaskAssignments = [{ id: 'assignment-1', taskId: 'task-1', userId: 'user-123' }];
 
-    const mockActivities = [
-      { id: 'activity-1', userId: 'user-123', action: 'LOGIN' },
-    ];
+    const mockActivities = [{ id: 'activity-1', userId: 'user-123', action: 'LOGIN' }];
 
     beforeEach(() => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(mockUserData);
@@ -430,7 +427,7 @@ describe('DataExportService - Comprehensive Tests', () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(service.exportUserData(mockContext, 'nonexistent-user')).rejects.toThrow(
-        'User not found'
+        'User not found',
       );
     });
 
@@ -442,7 +439,7 @@ describe('DataExportService - Comprehensive Tests', () => {
       (prisma.user.findUnique as jest.Mock).mockResolvedValue(differentOrgUser);
 
       await expect(service.exportUserData(mockContext, 'user-123')).rejects.toThrow(
-        'Access denied: User belongs to different organization'
+        'Access denied: User belongs to different organization',
       );
     });
   });
@@ -465,9 +462,7 @@ describe('DataExportService - Comprehensive Tests', () => {
 
       expect(deletedCount).toBe(1);
       expect(fs.unlink).toHaveBeenCalledTimes(1);
-      expect(fs.unlink).toHaveBeenCalledWith(
-        expect.stringContaining('old-export.json')
-      );
+      expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining('old-export.json'));
     });
 
     it('should handle errors during cleanup gracefully', async () => {
@@ -574,7 +569,7 @@ describe('DataExportService - Comprehensive Tests', () => {
       const options: ExportOptions = { format: 'json' };
 
       await expect(service.exportAssets(mockContext, options)).rejects.toThrow(
-        'Database connection lost'
+        'Database connection lost',
       );
     });
 

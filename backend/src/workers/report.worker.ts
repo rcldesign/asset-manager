@@ -106,7 +106,7 @@ export async function processReportJob(job: Job<ReportJob>): Promise<{
     // Send email if recipients are specified
     if (data.reportParams?.recipients && Array.isArray(data.reportParams.recipients)) {
       const downloadUrl = `${process.env.APP_URL}/api/reports/download/${reportHistory.id}`;
-      
+
       await addEmailJob({
         to: data.reportParams.recipients as string[],
         subject: `${getReportTitle(data.type)} - ${new Date().toLocaleDateString()}`,
@@ -173,19 +173,19 @@ async function generateAssetReport(
   // Apply filters from reportParams
   if (reportParams?.filters) {
     const filters = reportParams.filters as any;
-    
+
     if (filters.locationId) {
       whereClause.locationId = filters.locationId;
     }
-    
+
     if (filters.assetCategories && filters.assetCategories.length > 0) {
       whereClause.category = { in: filters.assetCategories };
     }
-    
+
     if (filters.assetStatuses && filters.assetStatuses.length > 0) {
       whereClause.status = { in: filters.assetStatuses };
     }
-    
+
     if (filters.startDate || filters.endDate) {
       whereClause.createdAt = {};
       if (filters.startDate) {
@@ -255,14 +255,20 @@ async function generateAssetReport(
   // Calculate summary statistics
   const summary = {
     totalAssets: assets.length,
-    byStatus: assets.reduce((acc, asset) => {
-      acc[asset.status] = (acc[asset.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>),
-    byCategory: assets.reduce((acc, asset) => {
-      acc[asset.category] = (acc[asset.category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>),
+    byStatus: assets.reduce(
+      (acc, asset) => {
+        acc[asset.status] = (acc[asset.status] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    ),
+    byCategory: assets.reduce(
+      (acc, asset) => {
+        acc[asset.category] = (acc[asset.category] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    ),
     totalValue: assets.reduce((sum, asset) => sum + Number(asset.purchasePrice || 0), 0),
     warrantyExpiring: assets.filter(
       (asset) =>
@@ -302,15 +308,15 @@ async function generateMaintenanceReport(
   // Apply filters
   if (reportParams?.filters) {
     const filters = reportParams.filters as any;
-    
+
     if (filters.taskStatuses && filters.taskStatuses.length > 0) {
       whereClause.status = { in: filters.taskStatuses };
     }
-    
+
     if (filters.taskPriorities && filters.taskPriorities.length > 0) {
       whereClause.priority = { in: filters.taskPriorities };
     }
-    
+
     if (filters.startDate || filters.endDate) {
       whereClause.dueDate = {};
       if (filters.startDate) {
@@ -357,7 +363,7 @@ async function generateMaintenanceReport(
           id: true,
           name: true,
           type: true,
-          frequency: true,
+          scheduleType: true,
         },
       },
     },
@@ -369,15 +375,23 @@ async function generateMaintenanceReport(
   // Calculate maintenance statistics
   const stats = {
     totalTasks: tasks.length,
-    byStatus: tasks.reduce((acc, task) => {
-      acc[task.status] = (acc[task.status] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>),
-    byPriority: tasks.reduce((acc, task) => {
-      acc[task.priority] = (acc[task.priority] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>),
-    overdue: tasks.filter((task) => task.dueDate && task.dueDate < new Date() && task.status !== 'DONE').length,
+    byStatus: tasks.reduce(
+      (acc, task) => {
+        acc[task.status] = (acc[task.status] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    ),
+    byPriority: tasks.reduce(
+      (acc, task) => {
+        acc[task.priority] = (acc[task.priority] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    ),
+    overdue: tasks.filter(
+      (task) => task.dueDate && task.dueDate < new Date() && task.status !== 'DONE',
+    ).length,
     dueThisWeek: tasks.filter(
       (task) =>
         task.dueDate &&
@@ -385,7 +399,9 @@ async function generateMaintenanceReport(
         task.dueDate < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     ).length,
     completionRate:
-      tasks.length > 0 ? (tasks.filter((task) => task.status === 'DONE').length / tasks.length) * 100 : 0,
+      tasks.length > 0
+        ? (tasks.filter((task) => task.status === 'DONE').length / tasks.length) * 100
+        : 0,
     estimatedCost: tasks.reduce((sum, task) => sum + Number(task.estimatedCost || 0), 0),
     actualCost: tasks.reduce((sum, task) => sum + Number(task.actualCost || 0), 0),
   };
@@ -522,30 +538,37 @@ async function generateCostAnalysis(
       {} as Record<string, any>,
     ),
     costByCategory: {
-      assets: assets.reduce((acc, asset) => {
-        const category = asset.category;
-        if (!acc[category]) {
-          acc[category] = 0;
-        }
-        acc[category] +=
-          Number(asset.purchasePrice || 0) +
-          asset.components.reduce((sum, comp) => sum + Number(comp.purchasePrice || 0), 0);
-        return acc;
-      }, {} as Record<string, number>),
-      maintenance: tasks.reduce((acc, task) => {
-        if (task.asset) {
-          const category = task.asset.category;
+      assets: assets.reduce(
+        (acc, asset) => {
+          const category = asset.category;
           if (!acc[category]) {
             acc[category] = 0;
           }
-          acc[category] += Number(task.actualCost || task.estimatedCost || 0);
-        }
-        return acc;
-      }, {} as Record<string, number>),
+          acc[category] +=
+            Number(asset.purchasePrice || 0) +
+            asset.components.reduce((sum, comp) => sum + Number(comp.purchasePrice || 0), 0);
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
+      maintenance: tasks.reduce(
+        (acc, task) => {
+          if (task.asset) {
+            const category = task.asset.category;
+            if (!acc[category]) {
+              acc[category] = 0;
+            }
+            acc[category] += Number(task.actualCost || task.estimatedCost || 0);
+          }
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
     },
   };
 
-  costAnalysis.summary.totalCost = costAnalysis.summary.totalAssetCost + costAnalysis.summary.totalMaintenanceCost;
+  costAnalysis.summary.totalCost =
+    costAnalysis.summary.totalAssetCost + costAnalysis.summary.totalMaintenanceCost;
 
   return {
     data: costAnalysis,
@@ -575,13 +598,7 @@ async function generateUsageStatistics(
   }
 
   // Get various usage statistics
-  const [
-    userStats,
-    assetStats,
-    taskStats,
-    locationStats,
-    recentActivity,
-  ] = await Promise.all([
+  const [userStats, assetStats, taskStats, locationStats, recentActivity] = await Promise.all([
     // User statistics
     prisma.user.groupBy({
       by: ['role'],
@@ -662,26 +679,38 @@ async function generateUsageStatistics(
   const statistics = {
     overview: {
       totalUsers: userStats.reduce((sum, u) => sum + u._count, 0),
-      usersByRole: userStats.reduce((acc, u) => {
-        acc[u.role] = u._count;
-        return acc;
-      }, {} as Record<string, number>),
+      usersByRole: userStats.reduce(
+        (acc, u) => {
+          acc[u.role] = u._count;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
       totalAssets,
-      assetsByStatus: assetsByStatus.reduce((acc, a) => {
-        acc[a.status] = a._count;
-        return acc;
-      }, {} as Record<string, number>),
-      assetsByCategory: assetsByCategory.reduce((acc, a) => {
-        acc[a.category] = a._count;
-        return acc;
-      }, {} as Record<string, number>),
+      assetsByStatus: assetsByStatus.reduce(
+        (acc, a) => {
+          acc[a.status] = a._count;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
+      assetsByCategory: assetsByCategory.reduce(
+        (acc, a) => {
+          acc[a.category] = a._count;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
       totalTasks,
       completedTasks,
       taskCompletionRate: totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0,
-      tasksByPriority: tasksByPriority.reduce((acc, t) => {
-        acc[t.priority] = t._count;
-        return acc;
-      }, {} as Record<string, number>),
+      tasksByPriority: tasksByPriority.reduce(
+        (acc, t) => {
+          acc[t.priority] = t._count;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
       averageTaskCost: avgTaskCost._avg.actualCost || 0,
     },
     locationUtilization: locationStats
@@ -693,29 +722,39 @@ async function generateUsageStatistics(
       .sort((a, b) => b.assetCount - a.assetCount),
     activitySummary: {
       totalActivities: recentActivity.length,
-      byAction: recentActivity.reduce((acc, activity) => {
-        acc[activity.action] = (acc[activity.action] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
-      byEntityType: recentActivity.reduce((acc, activity) => {
-        acc[activity.entityType] = (acc[activity.entityType] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
-      topUsers: Object.entries(
-        recentActivity.reduce((acc, activity) => {
-          if (activity.actor) {
-            const name = `${activity.actor.firstName} ${activity.actor.lastName}`;
-            acc[name] = (acc[name] || 0) + 1;
-          }
+      byAction: recentActivity.reduce(
+        (acc, activity) => {
+          acc[activity.action] = (acc[activity.action] || 0) + 1;
           return acc;
-        }, {} as Record<string, number>),
+        },
+        {} as Record<string, number>,
+      ),
+      byEntityType: recentActivity.reduce(
+        (acc, activity) => {
+          acc[activity.entityType] = (acc[activity.entityType] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
+      topUsers: Object.entries(
+        recentActivity.reduce(
+          (acc, activity) => {
+            if (activity.actor) {
+              const name = `${activity.actor.firstName} ${activity.actor.lastName}`;
+              acc[name] = (acc[name] || 0) + 1;
+            }
+            return acc;
+          },
+          {} as Record<string, number>,
+        ),
       )
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10),
     },
   };
 
-  const totalRecords = userStats.length + totalAssets + totalTasks + locationStats.length + recentActivity.length;
+  const totalRecords =
+    userStats.length + totalAssets + totalTasks + locationStats.length + recentActivity.length;
 
   return {
     data: statistics,
@@ -753,7 +792,7 @@ async function generateReportFile(
   }
 
   const stats = await fs.stat(filePath);
-  
+
   await job.updateProgress(95);
 
   return {
@@ -766,7 +805,7 @@ async function generatePDFReport(
   filePath: string,
   data: any,
   reportType: string,
-  reportParams: any,
+  _reportParams: any,
 ): Promise<void> {
   const doc = new PDFDocument({ margin: 50 });
   const stream = doc.pipe(createWriteStream(filePath));
@@ -793,7 +832,7 @@ async function generatePDFReport(
   }
 
   doc.end();
-  await new Promise((resolve) => stream.on('finish', resolve));
+  await new Promise<void>((resolve) => stream.on('finish', () => resolve()));
 }
 
 function generateAssetPDFContent(doc: PDFKit.PDFDocument, data: any): void {
@@ -828,7 +867,7 @@ function generateAssetPDFContent(doc: PDFKit.PDFDocument, data: any): void {
 
   data.assets.forEach((asset: any, index: number) => {
     if (index > 0) doc.moveDown();
-    
+
     doc.fontSize(12).text(`${asset.name}`, { underline: true });
     doc.fontSize(10);
     doc.text(`Category: ${asset.category}`);
@@ -837,7 +876,7 @@ function generateAssetPDFContent(doc: PDFKit.PDFDocument, data: any): void {
     doc.text(`Location: ${asset.location?.name || 'N/A'}`);
     doc.text(`Purchase Price: $${(asset.purchasePrice || 0).toFixed(2)}`);
     doc.text(`Total Value: $${asset.totalValue.toFixed(2)}`);
-    
+
     if (asset.tasks && asset.tasks.length > 0) {
       doc.text(`Pending Tasks: ${asset.tasks.length}`);
     }
@@ -865,14 +904,14 @@ function generateMaintenancePDFContent(doc: PDFKit.PDFDocument, data: any): void
 
   data.tasks.forEach((task: any, index: number) => {
     if (index > 0) doc.moveDown();
-    
+
     doc.fontSize(12).text(task.title, { underline: true });
     doc.fontSize(10);
     doc.text(`Status: ${task.status}`);
     doc.text(`Priority: ${task.priority}`);
     doc.text(`Due Date: ${task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'N/A'}`);
     doc.text(`Asset: ${task.asset?.name || 'N/A'}`);
-    
+
     if (task.assignments && task.assignments.length > 0) {
       const assignees = task.assignments
         .map((a: any) => `${a.user.firstName} ${a.user.lastName}`)
@@ -904,7 +943,7 @@ function generateCostAnalysisPDFContent(doc: PDFKit.PDFDocument, data: any): voi
     doc.fontSize(10).text(`${category}: $${(cost as number).toFixed(2)}`);
   });
   doc.moveDown();
-  
+
   doc.fontSize(12).text('Maintenance:', { underline: true });
   Object.entries(data.costByCategory.maintenance).forEach(([category, cost]) => {
     doc.fontSize(10).text(`${category}: $${(cost as number).toFixed(2)}`);
@@ -940,7 +979,7 @@ function generateUsageStatisticsPDFContent(doc: PDFKit.PDFDocument, data: any): 
   doc.fontSize(14).text('Activity Summary');
   doc.fontSize(10).text(`Total Activities: ${data.activitySummary.totalActivities}`);
   doc.moveDown();
-  
+
   doc.fontSize(12).text('Top Active Users:');
   data.activitySummary.topUsers.forEach(([user, count]: [string, number]) => {
     doc.fontSize(10).text(`${user}: ${count} activities`);
@@ -953,7 +992,15 @@ async function generateCSVReport(filePath: string, data: any, reportType: string
 
   switch (reportType) {
     case 'asset-report':
-      headers = ['Name', 'Category', 'Status', 'Serial Number', 'Location', 'Purchase Price', 'Total Value'];
+      headers = [
+        'Name',
+        'Category',
+        'Status',
+        'Serial Number',
+        'Location',
+        'Purchase Price',
+        'Total Value',
+      ];
       csvData = data.assets.map((asset: any) => ({
         Name: asset.name,
         Category: asset.category,
@@ -966,7 +1013,15 @@ async function generateCSVReport(filePath: string, data: any, reportType: string
       break;
 
     case 'maintenance-report':
-      headers = ['Title', 'Status', 'Priority', 'Due Date', 'Asset', 'Estimated Cost', 'Actual Cost'];
+      headers = [
+        'Title',
+        'Status',
+        'Priority',
+        'Due Date',
+        'Asset',
+        'Estimated Cost',
+        'Actual Cost',
+      ];
       csvData = data.tasks.map((task: any) => ({
         Title: task.title,
         Status: task.status,
@@ -996,7 +1051,7 @@ async function generateExcelReport(
   filePath: string,
   data: any,
   reportType: string,
-  reportParams: any,
+  _reportParams: any,
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Asset Manager';
@@ -1062,7 +1117,9 @@ async function generateAssetExcelReport(workbook: ExcelJS.Workbook, data: any): 
       purchaseDate: asset.purchaseDate ? new Date(asset.purchaseDate).toLocaleDateString() : '',
       purchasePrice: asset.purchasePrice || 0,
       totalValue: asset.totalValue,
-      warrantyExpiry: asset.warrantyExpiry ? new Date(asset.warrantyExpiry).toLocaleDateString() : '',
+      warrantyExpiry: asset.warrantyExpiry
+        ? new Date(asset.warrantyExpiry).toLocaleDateString()
+        : '',
     });
   });
 
@@ -1074,7 +1131,10 @@ async function generateAssetExcelReport(workbook: ExcelJS.Workbook, data: any): 
   };
 }
 
-async function generateMaintenanceExcelReport(workbook: ExcelJS.Workbook, data: any): Promise<void> {
+async function generateMaintenanceExcelReport(
+  workbook: ExcelJS.Workbook,
+  data: any,
+): Promise<void> {
   // Summary sheet
   const summarySheet = workbook.addWorksheet('Summary');
   summarySheet.columns = [
@@ -1113,7 +1173,9 @@ async function generateMaintenanceExcelReport(workbook: ExcelJS.Workbook, data: 
       dueDate: task.dueDate ? new Date(task.dueDate).toLocaleDateString() : '',
       asset: task.asset?.name || '',
       location: task.asset?.location?.name || '',
-      assignedTo: task.assignments?.map((a: any) => `${a.user.firstName} ${a.user.lastName}`).join(', ') || '',
+      assignedTo:
+        task.assignments?.map((a: any) => `${a.user.firstName} ${a.user.lastName}`).join(', ') ||
+        '',
       estimatedCost: task.estimatedCost || 0,
       actualCost: task.actualCost || 0,
     });
@@ -1126,7 +1188,10 @@ async function generateMaintenanceExcelReport(workbook: ExcelJS.Workbook, data: 
   };
 }
 
-async function generateCostAnalysisExcelReport(workbook: ExcelJS.Workbook, data: any): Promise<void> {
+async function generateCostAnalysisExcelReport(
+  workbook: ExcelJS.Workbook,
+  data: any,
+): Promise<void> {
   // Summary sheet
   const summarySheet = workbook.addWorksheet('Summary');
   summarySheet.columns = [
@@ -1136,7 +1201,10 @@ async function generateCostAnalysisExcelReport(workbook: ExcelJS.Workbook, data:
 
   summarySheet.addRows([
     { category: 'Total Asset Cost', amount: `$${data.summary.totalAssetCost.toFixed(2)}` },
-    { category: 'Total Maintenance Cost', amount: `$${data.summary.totalMaintenanceCost.toFixed(2)}` },
+    {
+      category: 'Total Maintenance Cost',
+      amount: `$${data.summary.totalMaintenanceCost.toFixed(2)}`,
+    },
     { category: 'Total Cost', amount: `$${data.summary.totalCost.toFixed(2)}` },
   ]);
 
@@ -1161,7 +1229,10 @@ async function generateCostAnalysisExcelReport(workbook: ExcelJS.Workbook, data:
   topAssetsSheet.getRow(1).font = { bold: true };
 }
 
-async function generateUsageStatisticsExcelReport(workbook: ExcelJS.Workbook, data: any): Promise<void> {
+async function generateUsageStatisticsExcelReport(
+  workbook: ExcelJS.Workbook,
+  data: any,
+): Promise<void> {
   // Overview sheet
   const overviewSheet = workbook.addWorksheet('Overview');
   overviewSheet.columns = [

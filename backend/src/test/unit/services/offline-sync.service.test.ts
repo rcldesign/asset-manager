@@ -1,51 +1,9 @@
 import { describe, beforeEach, afterEach, it, expect, jest } from '@jest/globals';
 import { OfflineSyncService } from '../../../services/offline-sync.service';
-import { prisma } from '../../../lib/prisma';
+import { prismaMock } from '../../../test/prisma-singleton';
 import { AppError } from '../../../utils/errors';
 import type { SyncRequest, SyncChange } from '../../../services/offline-sync.service';
 
-// Mock prisma
-jest.mock('../../../lib/prisma', () => ({
-  prisma: {
-    syncClient: {
-      findFirst: jest.fn(),
-      findUnique: jest.fn(),
-      upsert: jest.fn(),
-      update: jest.fn(),
-    },
-    syncQueue: {
-      create: jest.fn(),
-      update: jest.fn(),
-      findMany: jest.fn(),
-    },
-    syncMetadata: {
-      findUnique: jest.fn(),
-      upsert: jest.fn(),
-      findMany: jest.fn(),
-    },
-    syncConflict: {
-      create: jest.fn(),
-    },
-    user: {
-      findUnique: jest.fn(),
-    },
-    asset: {
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    },
-    task: {
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    },
-    $transaction: jest.fn(),
-  },
-}));
-
-const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 
 describe('OfflineSyncService', () => {
   let syncService: OfflineSyncService;
@@ -76,12 +34,12 @@ describe('OfflineSyncService', () => {
         syncToken: null,
       };
 
-      mockPrisma.syncClient.upsert.mockResolvedValue(mockClient);
+      prismaMock.syncClient.upsert.mockResolvedValue(mockClient);
 
       const result = await syncService.registerClient(userId, deviceId, 'Test Device');
 
       expect(result).toEqual(mockClient);
-      expect(mockPrisma.syncClient.upsert).toHaveBeenCalledWith({
+      expect(prismaMock.syncClient.upsert).toHaveBeenCalledWith({
         where: {
           userId_deviceId: {
             userId,
@@ -137,16 +95,16 @@ describe('OfflineSyncService', () => {
     };
 
     beforeEach(() => {
-      mockPrisma.syncClient.upsert.mockResolvedValue(mockClient);
-      mockPrisma.syncClient.update.mockResolvedValue({
+      prismaMock.syncClient.upsert.mockResolvedValue(mockClient);
+      prismaMock.syncClient.update.mockResolvedValue({
         ...mockClient,
         syncToken: expect.any(String),
       });
-      mockPrisma.syncMetadata.findMany.mockResolvedValue([]);
+      prismaMock.syncMetadata.findMany.mockResolvedValue([]);
     });
 
     it('should process sync request successfully', async () => {
-      mockPrisma.syncQueue.create.mockResolvedValue({
+      prismaMock.syncQueue.create.mockResolvedValue({
         id: 'queue-123',
         clientId,
         entityType: 'asset',
@@ -163,16 +121,16 @@ describe('OfflineSyncService', () => {
         processedAt: null,
       });
 
-      mockPrisma.syncMetadata.findUnique.mockResolvedValue(null);
-      mockPrisma.asset.create.mockResolvedValue({
+      prismaMock.syncMetadata.findUnique.mockResolvedValue(null);
+      prismaMock.asset.create.mockResolvedValue({
         id: 'asset-123',
         name: 'Test Asset',
         category: 'HARDWARE',
         organizationId: 'org-123',
       } as any);
 
-      mockPrisma.syncMetadata.upsert.mockResolvedValue({} as any);
-      mockPrisma.syncQueue.update.mockResolvedValue({} as any);
+      prismaMock.syncMetadata.upsert.mockResolvedValue({} as any);
+      prismaMock.syncQueue.update.mockResolvedValue({} as any);
 
       const result = await syncService.processSync(userId, mockSyncRequest);
 
@@ -185,7 +143,7 @@ describe('OfflineSyncService', () => {
 
     it('should handle conflicts during sync', async () => {
       // Mock existing metadata to trigger conflict
-      mockPrisma.syncMetadata.findUnique.mockResolvedValue({
+      prismaMock.syncMetadata.findUnique.mockResolvedValue({
         id: 'meta-123',
         entityType: 'asset',
         entityId: 'asset-123',
@@ -197,14 +155,14 @@ describe('OfflineSyncService', () => {
         clientId: 'other-client',
       });
 
-      mockPrisma.asset.findUnique.mockResolvedValue({
+      prismaMock.asset.findUnique.mockResolvedValue({
         id: 'asset-123',
         name: 'Different Asset Name',
         category: 'SOFTWARE',
         organizationId: 'org-123',
       } as any);
 
-      mockPrisma.syncQueue.create.mockResolvedValue({
+      prismaMock.syncQueue.create.mockResolvedValue({
         id: 'queue-123',
         clientId,
         entityType: 'asset',
@@ -221,7 +179,7 @@ describe('OfflineSyncService', () => {
         processedAt: null,
       });
 
-      mockPrisma.syncConflict.create.mockResolvedValue({} as any);
+      prismaMock.syncConflict.create.mockResolvedValue({} as any);
 
       const result = await syncService.processSync(userId, mockSyncRequest);
 
@@ -240,7 +198,7 @@ describe('OfflineSyncService', () => {
       const conflictId = 'conflict-123';
       const resolvedBy = 'user-123';
 
-      mockPrisma.syncConflict.findUnique.mockResolvedValue({
+      prismaMock.syncConflict.findUnique.mockResolvedValue({
         id: conflictId,
         entityType: 'asset',
         entityId: 'asset-123',
@@ -254,17 +212,17 @@ describe('OfflineSyncService', () => {
         createdAt: new Date(),
       });
 
-      mockPrisma.asset.update.mockResolvedValue({} as any);
-      mockPrisma.syncConflict.update.mockResolvedValue({} as any);
+      prismaMock.asset.update.mockResolvedValue({} as any);
+      prismaMock.syncConflict.update.mockResolvedValue({} as any);
 
       await syncService.resolveConflict(conflictId, 'CLIENT_WINS', resolvedBy);
 
-      expect(mockPrisma.asset.update).toHaveBeenCalledWith({
+      expect(prismaMock.asset.update).toHaveBeenCalledWith({
         where: { id: 'asset-123' },
         data: { name: 'Client Asset' },
       });
 
-      expect(mockPrisma.syncConflict.update).toHaveBeenCalledWith({
+      expect(prismaMock.syncConflict.update).toHaveBeenCalledWith({
         where: { id: conflictId },
         data: {
           resolution: 'CLIENT_WINS',
@@ -278,7 +236,7 @@ describe('OfflineSyncService', () => {
       const conflictId = 'conflict-123';
       const resolvedBy = 'user-123';
 
-      mockPrisma.syncConflict.findUnique.mockResolvedValue({
+      prismaMock.syncConflict.findUnique.mockResolvedValue({
         id: conflictId,
         entityType: 'asset',
         entityId: 'asset-123',
@@ -292,14 +250,14 @@ describe('OfflineSyncService', () => {
         createdAt: new Date(),
       });
 
-      mockPrisma.syncConflict.update.mockResolvedValue({} as any);
+      prismaMock.syncConflict.update.mockResolvedValue({} as any);
 
       await syncService.resolveConflict(conflictId, 'SERVER_WINS', resolvedBy);
 
       // Should not update the asset (server data remains)
-      expect(mockPrisma.asset.update).not.toHaveBeenCalled();
+      expect(prismaMock.asset.update).not.toHaveBeenCalled();
 
-      expect(mockPrisma.syncConflict.update).toHaveBeenCalledWith({
+      expect(prismaMock.syncConflict.update).toHaveBeenCalledWith({
         where: { id: conflictId },
         data: {
           resolution: 'SERVER_WINS',
@@ -310,10 +268,10 @@ describe('OfflineSyncService', () => {
     });
 
     it('should throw error for non-existent conflict', async () => {
-      mockPrisma.syncConflict.findUnique.mockResolvedValue(null);
+      prismaMock.syncConflict.findUnique.mockResolvedValue(null);
 
       await expect(
-        syncService.resolveConflict('non-existent', 'CLIENT_WINS', 'user-123')
+        syncService.resolveConflict('non-existent', 'CLIENT_WINS', 'user-123'),
       ).rejects.toThrow(AppError);
     });
   });
@@ -341,12 +299,12 @@ describe('OfflineSyncService', () => {
         },
       ];
 
-      mockPrisma.syncMetadata.findMany.mockResolvedValue(mockMetadata);
-      mockPrisma.user.findUnique.mockResolvedValue({
+      prismaMock.syncMetadata.findMany.mockResolvedValue(mockMetadata);
+      prismaMock.user.findUnique.mockResolvedValue({
         id: userId,
         organizationId: 'org-123',
       } as any);
-      mockPrisma.asset.findUnique.mockResolvedValue({
+      prismaMock.asset.findUnique.mockResolvedValue({
         id: 'asset-1',
         organizationId: 'org-123',
       } as any);
@@ -397,12 +355,12 @@ describe('OfflineSyncService', () => {
         },
       ];
 
-      mockPrisma.syncMetadata.findMany.mockResolvedValue(mockMetadata);
-      mockPrisma.user.findUnique.mockResolvedValue({
+      prismaMock.syncMetadata.findMany.mockResolvedValue(mockMetadata);
+      prismaMock.user.findUnique.mockResolvedValue({
         id: userId,
         organizationId: 'org-123',
       } as any);
-      mockPrisma.asset.findUnique.mockResolvedValue({
+      prismaMock.asset.findUnique.mockResolvedValue({
         id: 'asset-1',
         organizationId: 'org-123',
       } as any);
@@ -417,12 +375,12 @@ describe('OfflineSyncService', () => {
 
   describe('permission checking', () => {
     it('should allow access to assets in same organization', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
+      prismaMock.user.findUnique.mockResolvedValue({
         id: userId,
         organizationId: 'org-123',
       } as any);
 
-      mockPrisma.asset.findUnique.mockResolvedValue({
+      prismaMock.asset.findUnique.mockResolvedValue({
         id: 'asset-123',
         organizationId: 'org-123',
       } as any);
@@ -431,19 +389,19 @@ describe('OfflineSyncService', () => {
         userId,
         'asset',
         'asset-123',
-        'READ'
+        'READ',
       );
 
       expect(hasPermission).toBe(true);
     });
 
     it('should deny access to assets in different organization', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue({
+      prismaMock.user.findUnique.mockResolvedValue({
         id: userId,
         organizationId: 'org-123',
       } as any);
 
-      mockPrisma.asset.findUnique.mockResolvedValue({
+      prismaMock.asset.findUnique.mockResolvedValue({
         id: 'asset-123',
         organizationId: 'org-456', // Different organization
       } as any);
@@ -452,20 +410,20 @@ describe('OfflineSyncService', () => {
         userId,
         'asset',
         'asset-123',
-        'READ'
+        'READ',
       );
 
       expect(hasPermission).toBe(false);
     });
 
     it('should deny access for non-existent user', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
+      prismaMock.user.findUnique.mockResolvedValue(null);
 
       const hasPermission = await (syncService as any).checkPermission(
         'non-existent-user',
         'asset',
         'asset-123',
-        'READ'
+        'READ',
       );
 
       expect(hasPermission).toBe(false);
@@ -475,13 +433,10 @@ describe('OfflineSyncService', () => {
   describe('sync statistics', () => {
     it('should return sync stats for organization', async () => {
       const organizationId = 'org-123';
-      
-      mockPrisma.user.findMany.mockResolvedValue([
-        { id: 'user-1' },
-        { id: 'user-2' },
-      ] as any);
 
-      mockPrisma.$transaction.mockResolvedValue([
+      prismaMock.user.findMany.mockResolvedValue([{ id: 'user-1' }, { id: 'user-2' }] as any);
+
+      prismaMock.$transaction.mockResolvedValue([
         2, // active clients count
         [
           { status: 'PENDING', _count: 5 },
@@ -508,13 +463,13 @@ describe('OfflineSyncService', () => {
   describe('cleanup operations', () => {
     it('should clean up old sync data', async () => {
       const daysToKeep = 30;
-      
-      mockPrisma.syncQueue.deleteMany.mockResolvedValue({ count: 10 });
-      mockPrisma.syncConflict.deleteMany.mockResolvedValue({ count: 5 });
+
+      prismaMock.syncQueue.deleteMany.mockResolvedValue({ count: 10 });
+      prismaMock.syncConflict.deleteMany.mockResolvedValue({ count: 5 });
 
       await syncService.cleanupOldSyncData(daysToKeep);
 
-      expect(mockPrisma.syncQueue.deleteMany).toHaveBeenCalledWith({
+      expect(prismaMock.syncQueue.deleteMany).toHaveBeenCalledWith({
         where: {
           status: 'COMPLETED',
           processedAt: {
@@ -523,7 +478,7 @@ describe('OfflineSyncService', () => {
         },
       });
 
-      expect(mockPrisma.syncConflict.deleteMany).toHaveBeenCalledWith({
+      expect(prismaMock.syncConflict.deleteMany).toHaveBeenCalledWith({
         where: {
           resolvedAt: {
             lt: expect.any(Date),

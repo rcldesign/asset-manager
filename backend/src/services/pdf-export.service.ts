@@ -1,8 +1,9 @@
 import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
-import { TDocumentDefinitions, Content, Style, TableCell } from 'pdfmake/interfaces';
+import type { TDocumentDefinitions, Content, Style } from 'pdfmake/interfaces';
+import { TableCell } from 'pdfmake/interfaces';
 import { format } from 'date-fns';
-import { ReportOptions } from '../types/reports';
+import type { ReportOptions } from '../types/reports';
 import { logger } from '../utils/logger';
 
 // Initialize pdfMake with fonts
@@ -17,36 +18,33 @@ export class PDFExportService {
     header: {
       fontSize: 18,
       bold: true,
-      margin: [0, 0, 0, 10] as [number, number, number, number]
+      margin: [0, 0, 0, 10] as [number, number, number, number],
     },
     subheader: {
       fontSize: 14,
       bold: true,
-      margin: [0, 10, 0, 5] as [number, number, number, number]
+      margin: [0, 10, 0, 5] as [number, number, number, number],
     },
     tableHeader: {
       bold: true,
       fontSize: 11,
       color: 'white',
-      fillColor: '#2c3e50'
+      fillColor: '#2c3e50',
     },
     tableCell: {
       fontSize: 10,
-      margin: [0, 2, 0, 2] as [number, number, number, number]
+      margin: [0, 2, 0, 2] as [number, number, number, number],
     },
     footer: {
       fontSize: 9,
-      color: '#666666'
-    }
+      color: '#666666',
+    },
   };
 
   /**
    * Generate PDF for Overview Dashboard
    */
-  async generateOverviewDashboardPDF(
-    data: any,
-    options?: ReportOptions
-  ): Promise<Buffer> {
+  async generateOverviewDashboardPDF(data: any, options?: ReportOptions): Promise<Buffer> {
     const docDefinition: TDocumentDefinitions = {
       pageSize: 'A4',
       pageOrientation: 'portrait',
@@ -60,10 +58,10 @@ export class PDFExportService {
         { text: 'Recent Activity', style: 'subheader' },
         this.createRecentActivityTable(data.data.recentActivity),
         { text: 'Quick Actions', style: 'subheader' },
-        this.createQuickActionsSection(data.data.quickActions)
+        this.createQuickActionsSection(data.data.quickActions),
       ],
       styles: this.defaultStyles,
-      footer: this.createFooter
+      footer: this.createFooter,
     };
 
     return this.generatePDF(docDefinition);
@@ -72,10 +70,7 @@ export class PDFExportService {
   /**
    * Generate PDF for Asset Dashboard
    */
-  async generateAssetDashboardPDF(
-    data: any,
-    options?: ReportOptions
-  ): Promise<Buffer> {
+  async generateAssetDashboardPDF(data: any, options?: ReportOptions): Promise<Buffer> {
     const docDefinition: TDocumentDefinitions = {
       pageSize: 'A4',
       pageOrientation: 'landscape',
@@ -89,10 +84,10 @@ export class PDFExportService {
         { text: 'Maintenance History', style: 'subheader' },
         this.createMaintenanceHistorySection(data.data.maintenanceHistory),
         { text: 'Asset Value Analysis', style: 'subheader', pageBreak: 'before' },
-        this.createAssetValueSection(data.data.assetValue)
+        this.createAssetValueSection(data.data.assetValue),
       ],
       styles: this.defaultStyles,
-      footer: this.createFooter
+      footer: this.createFooter,
     };
 
     return this.generatePDF(docDefinition);
@@ -101,10 +96,7 @@ export class PDFExportService {
   /**
    * Generate PDF for Task Dashboard
    */
-  async generateTaskDashboardPDF(
-    data: any,
-    options?: ReportOptions
-  ): Promise<Buffer> {
+  async generateTaskDashboardPDF(data: any, options?: ReportOptions): Promise<Buffer> {
     const docDefinition: TDocumentDefinitions = {
       pageSize: 'A4',
       pageOrientation: 'portrait',
@@ -120,10 +112,10 @@ export class PDFExportService {
         { text: 'User Performance', style: 'subheader', pageBreak: 'before' },
         this.createUserPerformanceTable(data.data.userPerformance),
         { text: 'Task Backlog', style: 'subheader' },
-        this.createTaskBacklogSection(data.data.taskBacklog)
+        this.createTaskBacklogSection(data.data.taskBacklog),
       ],
       styles: this.defaultStyles,
-      footer: this.createFooter
+      footer: this.createFooter,
     };
 
     return this.generatePDF(docDefinition);
@@ -135,11 +127,11 @@ export class PDFExportService {
   async generateReportPDF(
     reportData: any,
     reportName: string,
-    options?: ReportOptions
+    options?: ReportOptions,
   ): Promise<Buffer> {
     const content: Content[] = [
       this.createHeader(reportName, options),
-      { text: `Generated on: ${format(new Date(), 'PPP')}`, fontSize: 10, margin: [0, 0, 0, 20] }
+      { text: `Generated on: ${format(new Date(), 'PPP')}`, fontSize: 10, margin: [0, 0, 0, 20] },
     ];
 
     // Handle different report structures
@@ -157,11 +149,15 @@ export class PDFExportService {
     }
 
     // Add any additional sections
-    Object.keys(reportData).forEach(key => {
+    Object.keys(reportData).forEach((key) => {
       if (key !== 'summary' && key !== 'data' && key !== 'metadata') {
         const section = reportData[key];
         if (Array.isArray(section) && section.length > 0) {
-          content.push({ text: this.formatSectionTitle(key), style: 'subheader', pageBreak: 'before' });
+          content.push({
+            text: this.formatSectionTitle(key),
+            style: 'subheader',
+            pageBreak: 'before',
+          });
           content.push(this.createDataTable(section));
         }
       }
@@ -172,7 +168,7 @@ export class PDFExportService {
       pageOrientation: this.determineOrientation(reportData),
       content,
       styles: this.defaultStyles,
-      footer: this.createFooter
+      footer: this.createFooter,
     };
 
     return this.generatePDF(docDefinition);
@@ -189,7 +185,7 @@ export class PDFExportService {
         image: options.customBranding.logo,
         width: 100,
         alignment: 'right',
-        margin: [0, 0, 0, 10] as [number, number, number, number]
+        margin: [0, 0, 0, 10] as [number, number, number, number],
       });
     }
 
@@ -197,12 +193,12 @@ export class PDFExportService {
       text: options?.customBranding?.companyName || 'Asset Management System',
       fontSize: 12,
       color: options?.customBranding?.primaryColor || '#2c3e50',
-      margin: [0, 0, 0, 5] as [number, number, number, number]
+      margin: [0, 0, 0, 5] as [number, number, number, number],
     });
 
     header.push({
       text: title,
-      style: 'header'
+      style: 'header',
     });
 
     return header;
@@ -215,7 +211,7 @@ export class PDFExportService {
     const rows: any[][] = [
       ['Generated At:', format(metadata.generatedAt, 'PPP HH:mm:ss')],
       ['Time Range:', metadata.timeRange],
-      ['Period:', `${format(metadata.startDate, 'PP')} - ${format(metadata.endDate, 'PP')}`]
+      ['Period:', `${format(metadata.startDate, 'PP')} - ${format(metadata.endDate, 'PP')}`],
     ];
 
     if (metadata.filters.locationId) {
@@ -228,10 +224,10 @@ export class PDFExportService {
     return {
       table: {
         widths: [100, '*'],
-        body: rows
+        body: rows,
       },
       layout: 'noBorders',
-      margin: [0, 0, 0, 20] as [number, number, number, number]
+      margin: [0, 0, 0, 20] as [number, number, number, number],
     };
   }
 
@@ -247,29 +243,29 @@ export class PDFExportService {
             { text: 'Total Assets', style: 'tableHeader' },
             { text: 'Active Assets', style: 'tableHeader' },
             { text: 'Total Tasks', style: 'tableHeader' },
-            { text: 'Open Tasks', style: 'tableHeader' }
+            { text: 'Open Tasks', style: 'tableHeader' },
           ],
           [
             { text: summaryCards.totalAssets.toString(), style: 'tableCell' },
             { text: summaryCards.activeAssets.toString(), style: 'tableCell' },
             { text: summaryCards.totalTasks.toString(), style: 'tableCell' },
-            { text: summaryCards.openTasks.toString(), style: 'tableCell' }
+            { text: summaryCards.openTasks.toString(), style: 'tableCell' },
           ],
           [
             { text: 'Overdue Tasks', style: 'tableHeader' },
             { text: 'Total Users', style: 'tableHeader' },
             { text: 'Active Users', style: 'tableHeader' },
-            { text: 'Total Value', style: 'tableHeader' }
+            { text: 'Total Value', style: 'tableHeader' },
           ],
           [
             { text: summaryCards.overdueTasks.toString(), style: 'tableCell' },
             { text: summaryCards.totalUsers.toString(), style: 'tableCell' },
             { text: summaryCards.activeUsers.toString(), style: 'tableCell' },
-            { text: `$${summaryCards.totalValue.toLocaleString()}`, style: 'tableCell' }
-          ]
-        ]
+            { text: `$${summaryCards.totalValue.toLocaleString()}`, style: 'tableCell' },
+          ],
+        ],
       },
-      margin: [0, 0, 0, 20] as [number, number, number, number]
+      margin: [0, 0, 0, 20] as [number, number, number, number],
     };
   }
 
@@ -287,13 +283,13 @@ export class PDFExportService {
           ['Assets Added', metrics.assetsAddedCount.toString()],
           ['Assets Updated', metrics.assetsUpdatedCount.toString()],
           ['Avg Task Completion Time', `${metrics.avgTaskCompletionTime} hours`],
-          ['Task Completion Rate', `${metrics.taskCompletionRate}%`]
-        ].map((row, index) => 
-          index === 0 
-            ? row.map(cell => ({ text: cell, style: 'tableHeader' }))
-            : row.map(cell => ({ text: cell, style: 'tableCell' }))
-        )
-      }
+          ['Task Completion Rate', `${metrics.taskCompletionRate}%`],
+        ].map((row, index) =>
+          index === 0
+            ? row.map((cell) => ({ text: cell, style: 'tableHeader' }))
+            : row.map((cell) => ({ text: cell, style: 'tableCell' })),
+        ),
+      },
     };
   }
 
@@ -306,11 +302,11 @@ export class PDFExportService {
     }
 
     const headers = ['Type', 'Title', 'User', 'Time'];
-    const rows = activities.map(activity => [
+    const rows = activities.map((activity) => [
       this.formatActivityType(activity.type),
       activity.title,
       activity.userName,
-      format(new Date(activity.timestamp), 'PP HH:mm')
+      format(new Date(activity.timestamp), 'PP HH:mm'),
     ]);
 
     return this.createTable(headers, rows);
@@ -323,28 +319,42 @@ export class PDFExportService {
     const content: Content[] = [];
 
     if (quickActions.urgentTasks.length > 0) {
-      content.push({ text: 'Urgent Tasks', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-      content.push(this.createTable(
-        ['Title', 'Due Date', 'Priority', 'Asset'],
-        quickActions.urgentTasks.map((task: any) => [
-          task.title,
-          format(new Date(task.dueDate), 'PP'),
-          task.priority,
-          task.assetName || '-'
-        ])
-      ));
+      content.push({
+        text: 'Urgent Tasks',
+        fontSize: 12,
+        bold: true,
+        margin: [0, 10, 0, 5] as [number, number, number, number],
+      });
+      content.push(
+        this.createTable(
+          ['Title', 'Due Date', 'Priority', 'Asset'],
+          quickActions.urgentTasks.map((task: any) => [
+            task.title,
+            format(new Date(task.dueDate), 'PP'),
+            task.priority,
+            task.assetName || '-',
+          ]),
+        ),
+      );
     }
 
     if (quickActions.warrantyAlerts.length > 0) {
-      content.push({ text: 'Warranty Alerts', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-      content.push(this.createTable(
-        ['Asset', 'Expiry Date', 'Days Until Expiry'],
-        quickActions.warrantyAlerts.map((alert: any) => [
-          alert.assetName,
-          format(new Date(alert.warrantyExpiry), 'PP'),
-          alert.daysUntilExpiry.toString()
-        ])
-      ));
+      content.push({
+        text: 'Warranty Alerts',
+        fontSize: 12,
+        bold: true,
+        margin: [0, 10, 0, 5] as [number, number, number, number],
+      });
+      content.push(
+        this.createTable(
+          ['Asset', 'Expiry Date', 'Days Until Expiry'],
+          quickActions.warrantyAlerts.map((alert: any) => [
+            alert.assetName,
+            format(new Date(alert.warrantyExpiry), 'PP'),
+            alert.daysUntilExpiry.toString(),
+          ]),
+        ),
+      );
     }
 
     return content;
@@ -358,30 +368,46 @@ export class PDFExportService {
 
     // By Category
     content.push({ text: 'By Category', fontSize: 12, bold: true });
-    content.push(this.createTable(
-      ['Category', 'Count'],
-      Object.entries(stats.byCategory).map(([cat, count]) => [cat, count!.toString()])
-    ));
+    content.push(
+      this.createTable(
+        ['Category', 'Count'],
+        Object.entries(stats.byCategory).map(([cat, count]) => [cat, count!.toString()]),
+      ),
+    );
 
     // By Status
-    content.push({ text: 'By Status', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-    content.push(this.createTable(
-      ['Status', 'Count'],
-      Object.entries(stats.byStatus).map(([status, count]) => [status, count!.toString()])
-    ));
+    content.push({
+      text: 'By Status',
+      fontSize: 12,
+      bold: true,
+      margin: [0, 10, 0, 5] as [number, number, number, number],
+    });
+    content.push(
+      this.createTable(
+        ['Status', 'Count'],
+        Object.entries(stats.byStatus).map(([status, count]) => [status, count!.toString()]),
+      ),
+    );
 
     // By Age
-    content.push({ text: 'By Age', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-    content.push(this.createTable(
-      ['Age Range', 'Count'],
-      [
-        ['Less than 1 year', stats.byAge.lessThan1Year.toString()],
-        ['1-3 years', stats.byAge.oneToThreeYears.toString()],
-        ['3-5 years', stats.byAge.threeToFiveYears.toString()],
-        ['More than 5 years', stats.byAge.moreThanFiveYears.toString()],
-        ['Unknown', stats.byAge.unknown.toString()]
-      ]
-    ));
+    content.push({
+      text: 'By Age',
+      fontSize: 12,
+      bold: true,
+      margin: [0, 10, 0, 5] as [number, number, number, number],
+    });
+    content.push(
+      this.createTable(
+        ['Age Range', 'Count'],
+        [
+          ['Less than 1 year', stats.byAge.lessThan1Year.toString()],
+          ['1-3 years', stats.byAge.oneToThreeYears.toString()],
+          ['3-5 years', stats.byAge.threeToFiveYears.toString()],
+          ['More than 5 years', stats.byAge.moreThanFiveYears.toString()],
+          ['Unknown', stats.byAge.unknown.toString()],
+        ],
+      ),
+    );
 
     return content;
   }
@@ -399,25 +425,34 @@ export class PDFExportService {
         body: [
           ['Active Warranties', warranty.activeWarranties.toString()],
           ['Lifetime Warranties', warranty.lifetimeWarranties.toString()],
-          ['Expired Warranties', warranty.expiredWarranties.toString()]
-        ]
+          ['Expired Warranties', warranty.expiredWarranties.toString()],
+        ],
       },
-      layout: 'lightHorizontalLines'
+      layout: 'lightHorizontalLines',
     });
 
     // Expiring warranties
     if (warranty.expiringWarranties.length > 0) {
-      content.push({ text: 'Expiring Soon', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-      content.push(this.createTable(
-        ['Asset', 'Category', 'Location', 'Expiry', 'Days Left'],
-        warranty.expiringWarranties.slice(0, 10).map((w: any) => [
-          w.assetName,
-          w.category,
-          w.location,
-          format(new Date(w.expiryDate), 'PP'),
-          w.daysUntilExpiry.toString()
-        ])
-      ));
+      content.push({
+        text: 'Expiring Soon',
+        fontSize: 12,
+        bold: true,
+        margin: [0, 10, 0, 5] as [number, number, number, number],
+      });
+      content.push(
+        this.createTable(
+          ['Asset', 'Category', 'Location', 'Expiry', 'Days Left'],
+          warranty.expiringWarranties
+            .slice(0, 10)
+            .map((w: any) => [
+              w.assetName,
+              w.category,
+              w.location,
+              format(new Date(w.expiryDate), 'PP'),
+              w.daysUntilExpiry.toString(),
+            ]),
+        ),
+      );
     }
 
     return content;
@@ -434,9 +469,9 @@ export class PDFExportService {
       columns: [
         { text: `Scheduled: ${maintenance.scheduledMaintenance}`, width: '*' },
         { text: `Completed: ${maintenance.completedMaintenance}`, width: '*' },
-        { text: `Overdue: ${maintenance.overdueMaintenance}`, width: '*' }
+        { text: `Overdue: ${maintenance.overdueMaintenance}`, width: '*' },
       ],
-      margin: [0, 0, 0, 10] as [number, number, number, number]
+      margin: [0, 0, 0, 10] as [number, number, number, number],
     });
 
     // Costs
@@ -447,24 +482,31 @@ export class PDFExportService {
         body: [
           ['Total Tasks', maintenance.maintenanceCosts.period.toString()],
           ['Actual Cost', `$${maintenance.maintenanceCosts.actual.toLocaleString()}`],
-          ['Estimated Cost', `$${maintenance.maintenanceCosts.estimated.toLocaleString()}`]
-        ]
+          ['Estimated Cost', `$${maintenance.maintenanceCosts.estimated.toLocaleString()}`],
+        ],
       },
-      layout: 'lightHorizontalLines'
+      layout: 'lightHorizontalLines',
     });
 
     // Upcoming maintenance
     if (maintenance.upcomingMaintenance.length > 0) {
-      content.push({ text: 'Upcoming Maintenance', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-      content.push(this.createTable(
-        ['Asset', 'Task', 'Due Date', 'Est. Cost'],
-        maintenance.upcomingMaintenance.map((m: any) => [
-          m.assetName,
-          m.taskTitle,
-          format(new Date(m.dueDate), 'PP'),
-          `$${m.estimatedCost.toLocaleString()}`
-        ])
-      ));
+      content.push({
+        text: 'Upcoming Maintenance',
+        fontSize: 12,
+        bold: true,
+        margin: [0, 10, 0, 5] as [number, number, number, number],
+      });
+      content.push(
+        this.createTable(
+          ['Asset', 'Task', 'Due Date', 'Est. Cost'],
+          maintenance.upcomingMaintenance.map((m: any) => [
+            m.assetName,
+            m.taskTitle,
+            format(new Date(m.dueDate), 'PP'),
+            `$${m.estimatedCost.toLocaleString()}`,
+          ]),
+        ),
+      );
     }
 
     return content;
@@ -483,24 +525,34 @@ export class PDFExportService {
         body: [
           ['Total Purchase Value', `$${value.totalPurchaseValue.toLocaleString()}`],
           ['Current Value (Depreciated)', `$${value.depreciatedValue.toLocaleString()}`],
-          ['Total Depreciation', `$${(value.totalPurchaseValue - value.depreciatedValue).toLocaleString()}`]
-        ]
+          [
+            'Total Depreciation',
+            `$${(value.totalPurchaseValue - value.depreciatedValue).toLocaleString()}`,
+          ],
+        ],
       },
-      layout: 'lightHorizontalLines'
+      layout: 'lightHorizontalLines',
     });
 
     // Top value assets
     if (value.topValueAssets.length > 0) {
-      content.push({ text: 'Top Value Assets', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-      content.push(this.createTable(
-        ['Asset', 'Category', 'Purchase Price', 'Purchase Date'],
-        value.topValueAssets.map((asset: any) => [
-          asset.name,
-          asset.category,
-          `$${asset.purchasePrice.toLocaleString()}`,
-          asset.purchaseDate ? format(new Date(asset.purchaseDate), 'PP') : '-'
-        ])
-      ));
+      content.push({
+        text: 'Top Value Assets',
+        fontSize: 12,
+        bold: true,
+        margin: [0, 10, 0, 5] as [number, number, number, number],
+      });
+      content.push(
+        this.createTable(
+          ['Asset', 'Category', 'Purchase Price', 'Purchase Date'],
+          value.topValueAssets.map((asset: any) => [
+            asset.name,
+            asset.category,
+            `$${asset.purchasePrice.toLocaleString()}`,
+            asset.purchaseDate ? format(new Date(asset.purchaseDate), 'PP') : '-',
+          ]),
+        ),
+      );
     }
 
     return content;
@@ -514,30 +566,47 @@ export class PDFExportService {
 
     // By Status
     content.push({ text: 'By Status', fontSize: 12, bold: true });
-    content.push(this.createTable(
-      ['Status', 'Count'],
-      Object.entries(metrics.byStatus).map(([status, count]) => [status, count!.toString()])
-    ));
+    content.push(
+      this.createTable(
+        ['Status', 'Count'],
+        Object.entries(metrics.byStatus).map(([status, count]) => [status, count!.toString()]),
+      ),
+    );
 
     // By Priority
-    content.push({ text: 'By Priority', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-    content.push(this.createTable(
-      ['Priority', 'Count'],
-      Object.entries(metrics.byPriority).map(([priority, count]) => [priority, count!.toString()])
-    ));
+    content.push({
+      text: 'By Priority',
+      fontSize: 12,
+      bold: true,
+      margin: [0, 10, 0, 5] as [number, number, number, number],
+    });
+    content.push(
+      this.createTable(
+        ['Priority', 'Count'],
+        Object.entries(metrics.byPriority).map(([priority, count]) => [
+          priority,
+          count!.toString(),
+        ]),
+      ),
+    );
 
     // Completion rates
-    content.push({ text: 'Completion Rates', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
+    content.push({
+      text: 'Completion Rates',
+      fontSize: 12,
+      bold: true,
+      margin: [0, 10, 0, 5] as [number, number, number, number],
+    });
     content.push({
       table: {
         widths: ['*', 'auto'],
         body: [
           ['Overall Completion Rate', `${metrics.completionRate.overall}%`],
           ['On-Time Completion Rate', `${metrics.completionRate.onTime}%`],
-          ['Late Completion Rate', `${metrics.completionRate.late}%`]
-        ]
+          ['Late Completion Rate', `${metrics.completionRate.late}%`],
+        ],
       },
-      layout: 'lightHorizontalLines'
+      layout: 'lightHorizontalLines',
     });
 
     return content;
@@ -554,9 +623,9 @@ export class PDFExportService {
         { text: `Created: ${performance.tasksCreated}`, width: '*' },
         { text: `Completed: ${performance.tasksCompleted}`, width: '*' },
         { text: `Overdue: ${performance.tasksOverdue}`, width: '*' },
-        { text: `Cancelled: ${performance.tasksCancelled}`, width: '*' }
+        { text: `Cancelled: ${performance.tasksCancelled}`, width: '*' },
       ],
-      margin: [0, 0, 0, 10] as [number, number, number, number]
+      margin: [0, 0, 0, 10] as [number, number, number, number],
     });
 
     // Trend chart would go here if we had chart support
@@ -577,24 +646,36 @@ export class PDFExportService {
         body: [
           ['Total Estimated Cost', `$${cost.totalEstimatedCost.toLocaleString()}`],
           ['Total Actual Cost', `$${cost.totalActualCost.toLocaleString()}`],
-          ['Variance', `$${cost.variance.toLocaleString()} (${cost.variance >= 0 ? '+' : ''}${((cost.variance / cost.totalEstimatedCost) * 100).toFixed(1)}%)`]
-        ]
+          [
+            'Variance',
+            `$${cost.variance.toLocaleString()} (${cost.variance >= 0 ? '+' : ''}${((cost.variance / cost.totalEstimatedCost) * 100).toFixed(1)}%)`,
+          ],
+        ],
       },
-      layout: 'lightHorizontalLines'
+      layout: 'lightHorizontalLines',
     });
 
     // Over-budget tasks
     if (cost.overBudgetTasks.length > 0) {
-      content.push({ text: 'Over-Budget Tasks', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
-      content.push(this.createTable(
-        ['Task', 'Estimated', 'Actual', 'Over %'],
-        cost.overBudgetTasks.slice(0, 10).map((task: any) => [
-          task.title.substring(0, 40) + (task.title.length > 40 ? '...' : ''),
-          `$${task.estimatedCost.toLocaleString()}`,
-          `$${task.actualCost.toLocaleString()}`,
-          `${task.percentOver}%`
-        ])
-      ));
+      content.push({
+        text: 'Over-Budget Tasks',
+        fontSize: 12,
+        bold: true,
+        margin: [0, 10, 0, 5] as [number, number, number, number],
+      });
+      content.push(
+        this.createTable(
+          ['Task', 'Estimated', 'Actual', 'Over %'],
+          cost.overBudgetTasks
+            .slice(0, 10)
+            .map((task: any) => [
+              task.title.substring(0, 40) + (task.title.length > 40 ? '...' : ''),
+              `$${task.estimatedCost.toLocaleString()}`,
+              `$${task.actualCost.toLocaleString()}`,
+              `${task.percentOver}%`,
+            ]),
+        ),
+      );
     }
 
     return content;
@@ -610,13 +691,15 @@ export class PDFExportService {
 
     return this.createTable(
       ['User', 'Assigned', 'Completed', 'Completion %', 'On-Time %'],
-      users.slice(0, 10).map(user => [
-        user.userName,
-        user.tasksAssigned.toString(),
-        user.tasksCompleted.toString(),
-        `${user.completionRate}%`,
-        `${user.onTimeRate}%`
-      ])
+      users
+        .slice(0, 10)
+        .map((user) => [
+          user.userName,
+          user.tasksAssigned.toString(),
+          user.tasksCompleted.toString(),
+          `${user.completionRate}%`,
+          `${user.onTimeRate}%`,
+        ]),
     );
   }
 
@@ -631,18 +714,23 @@ export class PDFExportService {
         widths: ['*', 'auto'],
         body: [
           ['Total Backlog', backlog.total.toString()],
-          ['Average Age', `${backlog.avgAge} days`]
-        ]
+          ['Average Age', `${backlog.avgAge} days`],
+        ],
       },
-      layout: 'lightHorizontalLines'
+      layout: 'lightHorizontalLines',
     });
 
     if (backlog.oldestTask) {
-      content.push({ text: 'Oldest Task', fontSize: 12, bold: true, margin: [0, 10, 0, 5] as [number, number, number, number] });
+      content.push({
+        text: 'Oldest Task',
+        fontSize: 12,
+        bold: true,
+        margin: [0, 10, 0, 5] as [number, number, number, number],
+      });
       content.push({
         text: `${backlog.oldestTask.title} (${backlog.oldestTask.daysOld} days old)`,
         fontSize: 10,
-        color: '#666666'
+        color: '#666666',
       });
     }
 
@@ -658,14 +746,14 @@ export class PDFExportService {
     }
 
     const headers = Object.keys(data[0]);
-    const rows = data.map(row => 
-      headers.map(header => {
+    const rows = data.map((row) =>
+      headers.map((header) => {
         const value = row[header];
         if (value === null || value === undefined) return '-';
         if (value instanceof Date) return format(value, 'PP');
         if (typeof value === 'object') return JSON.stringify(value);
         return value.toString();
-      })
+      }),
     );
 
     return this.createTable(headers, rows);
@@ -677,18 +765,18 @@ export class PDFExportService {
   private createSummaryTable(summary: any): Content {
     const rows = Object.entries(summary).map(([key, value]) => [
       this.formatHeaderName(key),
-      this.formatValue(value)
+      this.formatValue(value),
     ]);
 
     return {
       table: {
         widths: ['*', 'auto'],
-        body: rows.map((row, index) => 
-          row.map(cell => ({ text: cell, style: index === 0 ? 'tableHeader' : 'tableCell' }))
-        )
+        body: rows.map((row, index) =>
+          row.map((cell) => ({ text: cell, style: index === 0 ? 'tableHeader' : 'tableCell' })),
+        ),
       },
       layout: 'lightHorizontalLines',
-      margin: [0, 0, 0, 20] as [number, number, number, number]
+      margin: [0, 0, 0, 20] as [number, number, number, number],
     };
   }
 
@@ -701,16 +789,16 @@ export class PDFExportService {
         headerRows: 1,
         widths: headers.map(() => '*'),
         body: [
-          headers.map(h => ({ text: h, style: 'tableHeader' })),
-          ...rows.map(row => row.map(cell => ({ text: cell, style: 'tableCell' })))
-        ]
+          headers.map((h) => ({ text: h, style: 'tableHeader' })),
+          ...rows.map((row) => row.map((cell) => ({ text: cell, style: 'tableCell' }))),
+        ],
       },
       layout: {
         fillColor: (rowIndex: number) => {
           if (rowIndex === 0) return '#2c3e50';
           return rowIndex % 2 === 0 ? '#f8f9fa' : null;
-        }
-      }
+        },
+      },
     };
   }
 
@@ -721,9 +809,9 @@ export class PDFExportService {
     return {
       columns: [
         { text: `Generated by Asset Management System`, style: 'footer' },
-        { text: `Page ${currentPage} of ${pageCount}`, alignment: 'right', style: 'footer' }
+        { text: `Page ${currentPage} of ${pageCount}`, alignment: 'right', style: 'footer' },
       ],
-      margin: [40, 0] as [number, number]
+      margin: [40, 0] as [number, number],
     };
   }
 
@@ -764,7 +852,7 @@ export class PDFExportService {
       task_created: 'Task Created',
       task_completed: 'Task Completed',
       asset_added: 'Asset Added',
-      asset_updated: 'Asset Updated'
+      asset_updated: 'Asset Updated',
     };
     return typeMap[type] || type;
   }
@@ -778,7 +866,7 @@ export class PDFExportService {
       .replace(/_/g, ' ')
       .trim()
       .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
       .join(' ');
   }
 
@@ -791,7 +879,7 @@ export class PDFExportService {
       .replace(/([A-Z])/g, ' $1')
       .trim()
       .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
       .join(' ');
   }
 

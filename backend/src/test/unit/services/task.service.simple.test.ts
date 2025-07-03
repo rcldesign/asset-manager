@@ -2,12 +2,17 @@ import { describe, test, expect, beforeEach } from '@jest/globals';
 import { TaskService } from '../../../services/task.service';
 import { NotFoundError, ConflictError, ValidationError } from '../../../utils/errors';
 
+// Mock Prisma for this test since TaskService now requires it
+jest.mock('../../../lib/prisma');
+import { prisma } from '../../../lib/prisma';
+
 // Create a simple mock for testing key functionality
 describe('TaskService - Status Transition Logic', () => {
   let taskService: TaskService;
 
   beforeEach(() => {
-    taskService = new TaskService();
+    const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+    taskService = new TaskService(mockPrisma);
   });
 
   describe('validateStatusTransition (private method testing via updateTask)', () => {

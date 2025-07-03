@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, jest, afterEach } from '@jest/globals';
 import { DataExportService } from '../../../services/data-export.service';
-import { IRequestContext } from '../../../interfaces/context.interface';
+import type { IRequestContext } from '../../../interfaces/context.interface';
 import * as fs from 'fs/promises';
 
 // Mock all external dependencies
@@ -24,9 +24,9 @@ describe('DataExportService', () => {
       organizationId: 'test-org-id',
       requestId: 'test-request-id',
     };
-    
+
     jest.clearAllMocks();
-    
+
     // Setup default mocks
     mockFs.access.mockResolvedValue(undefined);
     mockFs.mkdir.mockResolvedValue(undefined);
@@ -116,9 +116,7 @@ describe('DataExportService', () => {
 
       expect(deletedCount).toBe(1);
       expect(mockFs.unlink).toHaveBeenCalledTimes(1);
-      expect(mockFs.unlink).toHaveBeenCalledWith(
-        expect.stringContaining('old-file.json')
-      );
+      expect(mockFs.unlink).toHaveBeenCalledWith(expect.stringContaining('old-file.json'));
     });
 
     it('should not delete recent files', async () => {
@@ -138,20 +136,19 @@ describe('DataExportService', () => {
   describe('initializeExportDirectory', () => {
     it('should create export directory if it does not exist', async () => {
       mockFs.access.mockRejectedValueOnce(new Error('Directory does not exist'));
-      
+
       await service['initializeExportDirectory']();
-      
-      expect(mockFs.mkdir).toHaveBeenCalledWith(
-        expect.stringContaining('exports'),
-        { recursive: true }
-      );
+
+      expect(mockFs.mkdir).toHaveBeenCalledWith(expect.stringContaining('exports'), {
+        recursive: true,
+      });
     });
 
     it('should not create directory if it exists', async () => {
       mockFs.access.mockResolvedValueOnce(undefined);
-      
+
       await service['initializeExportDirectory']();
-      
+
       expect(mockFs.mkdir).not.toHaveBeenCalled();
     });
   });

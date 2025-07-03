@@ -31,6 +31,13 @@ enum TaskPriority {
   LOW
 }
 
+enum TaskCategory {
+  MAINTENANCE
+  GENERAL
+  INSPECTION
+  REPAIR
+}
+
 enum ScheduleType {
   ONE_OFF
   FIXED_INTERVAL
@@ -377,6 +384,7 @@ model Task {
   dueDate          DateTime
   status           TaskStatus   @default(PLANNED)
   priority         TaskPriority @default(MEDIUM)
+  category         TaskCategory? // Category for filtering and reporting
   estimatedCost    Decimal?     @db.Decimal(10, 2)
   actualCost       Decimal?     @db.Decimal(10, 2)
   estimatedMinutes Int?
@@ -408,6 +416,7 @@ model Task {
   @@index([dueDate])
   @@index([status])
   @@index([parentTaskId])
+  @@index([category])
   @@map("tasks")
 }
 

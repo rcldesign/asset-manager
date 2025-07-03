@@ -1,9 +1,9 @@
 /**
  * Dashboard Types and Interfaces
- * 
+ *
  * Defines the data structures for all dashboard views:
  * - Overview Dashboard
- * - Asset-Centric Dashboard 
+ * - Asset-Centric Dashboard
  * - Calendar-Centric Dashboard
  * - Task-Centric Dashboard
  */
@@ -21,7 +21,7 @@ export enum DashboardTimeRange {
   THIS_YEAR = 'this_year',
   LAST_30_DAYS = 'last_30_days',
   LAST_90_DAYS = 'last_90_days',
-  CUSTOM = 'custom'
+  CUSTOM = 'custom',
 }
 
 /**
@@ -50,7 +50,7 @@ export interface OverviewDashboardData {
     activeUsers: number;
     totalValue: number;
   };
-  
+
   activityMetrics: {
     tasksCreatedCount: number;
     tasksCompletedCount: number;
@@ -59,7 +59,7 @@ export interface OverviewDashboardData {
     avgTaskCompletionTime: number; // in hours
     taskCompletionRate: number; // percentage
   };
-  
+
   recentActivity: Array<{
     id: string;
     type: 'task_created' | 'task_completed' | 'asset_added' | 'asset_updated';
@@ -68,7 +68,7 @@ export interface OverviewDashboardData {
     userId: string;
     userName: string;
   }>;
-  
+
   quickActions: {
     urgentTasks: Array<{
       id: string;
@@ -107,7 +107,7 @@ export interface AssetDashboardData {
       unknown: number;
     };
   };
-  
+
   warrantyAnalysis: {
     activeWarranties: number;
     expiringWarranties: Array<{
@@ -121,7 +121,7 @@ export interface AssetDashboardData {
     lifetimeWarranties: number;
     expiredWarranties: number;
   };
-  
+
   maintenanceHistory: {
     scheduledMaintenance: number;
     completedMaintenance: number;
@@ -140,7 +140,7 @@ export interface AssetDashboardData {
       estimated: number;
     };
   };
-  
+
   assetValue: {
     totalPurchaseValue: number;
     depreciatedValue: number;
@@ -182,7 +182,7 @@ export interface CalendarDashboardData {
       actualCost: number;
     }>;
   };
-  
+
   scheduleData: {
     activeSchedules: number;
     recurringTasks: number;
@@ -199,7 +199,7 @@ export interface CalendarDashboardData {
       priority: TaskPriority;
     }>;
   };
-  
+
   workloadBalance: {
     byUser: Array<{
       userId: string;
@@ -216,7 +216,7 @@ export interface CalendarDashboardData {
       avgTasksPerMember: number;
     }>;
   };
-  
+
   upcomingDeadlines: Array<{
     taskId: string;
     title: string;
@@ -246,7 +246,7 @@ export interface TaskDashboardData {
       byCategory: Record<string, number>;
     };
   };
-  
+
   performanceAnalysis: {
     tasksCreated: number;
     tasksCompleted: number;
@@ -259,7 +259,7 @@ export interface TaskDashboardData {
       overdue: number;
     }>;
   };
-  
+
   costAnalysis: {
     totalEstimatedCost: number;
     totalActualCost: number;
@@ -279,7 +279,7 @@ export interface TaskDashboardData {
       percentOver: number;
     }>;
   };
-  
+
   userPerformance: Array<{
     userId: string;
     userName: string;
@@ -289,7 +289,7 @@ export interface TaskDashboardData {
     avgCompletionTime: number;
     onTimeRate: number;
   }>;
-  
+
   taskBacklog: {
     total: number;
     byPriority: Record<TaskPriority, number>;

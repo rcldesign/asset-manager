@@ -12,5 +12,5 @@ export { default as activityStreamRoutes } from './activity-streams';
 export { default as googleAuthRoutes } from './google-auth';
 export { default as emailWebhookRoutes } from './email-webhooks';
 export { default as auditTrailRoutes } from './audit-trail';
-export { default as dashboardRoutes } from './dashboards';
+export { default as dashboardRoutes } from './dashboard';
 export { default as reportRoutes } from './reports';

@@ -1,9 +1,9 @@
 import { AssetCategory, AssetStatus, TaskStatus, TaskPriority } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError, ValidationError } from '../utils/errors';
-import { IRequestContext } from '../interfaces/context.interface';
+import type { IRequestContext } from '../interfaces/context.interface';
 import { AuditService } from './audit.service';
-import { ActionType } from '@prisma/client';
+import { ActionType, PrismaClient } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as csv from 'csv-parse';
 import * as XLSX from 'xlsx';
@@ -53,10 +53,12 @@ export interface ValidationResult {
  * Supports CSV, Excel, and JSON formats with validation and batch processing.
  */
 export class DataImportService {
+  private prisma: PrismaClient;
   private auditService: AuditService;
   private defaultBatchSize = 100;
 
-  constructor() {
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
     this.auditService = new AuditService();
   }
 
@@ -66,10 +68,10 @@ export class DataImportService {
   async importAssets(
     context: IRequestContext,
     filePath: string,
-    options: ImportOptions
+    options: ImportOptions,
   ): Promise<ImportResult> {
     const data = await this.parseFile(filePath, options.format);
-    
+
     if (options.validateOnly) {
       const validation = await this.validateAssets(data, options.mapping);
       return {
@@ -92,31 +94,28 @@ export class DataImportService {
     };
 
     const batchSize = options.batchSize || this.defaultBatchSize;
-    
+
     // Process in batches
     for (let i = 0; i < data.length; i += batchSize) {
       const batch = data.slice(i, i + batchSize);
-      await this.processBatch(
-        batch,
-        async (record, rowIndex) => {
-          try {
-            const mappedData = this.applyFieldMapping(record, options.mapping);
-            const asset = await this.createAsset(context, mappedData, rowIndex + i + 1);
-            result.importedIds.push(asset.id);
-            result.successCount++;
-          } catch (error: any) {
-            result.errorCount++;
-            result.errors.push({
-              row: rowIndex + i + 1,
-              message: error.message,
-            });
-            
-            if (!options.skipErrors) {
-              throw error;
-            }
+      await this.processBatch(batch, async (record, rowIndex) => {
+        try {
+          const mappedData = this.applyFieldMapping(record, options.mapping);
+          const asset = await this.createAsset(context, mappedData, rowIndex + i + 1);
+          result.importedIds.push(asset.id);
+          result.successCount++;
+        } catch (error: any) {
+          result.errorCount++;
+          result.errors.push({
+            row: rowIndex + i + 1,
+            message: error.message,
+          });
+
+          if (!options.skipErrors) {
+            throw error;
           }
         }
-      );
+      });
     }
 
     // Log import action
@@ -142,10 +141,10 @@ export class DataImportService {
   async importTasks(
     context: IRequestContext,
     filePath: string,
-    options: ImportOptions
+    options: ImportOptions,
   ): Promise<ImportResult> {
     const data = await this.parseFile(filePath, options.format);
-    
+
     if (options.validateOnly) {
       const validation = await this.validateTasks(data, options.mapping);
       return {
@@ -168,30 +167,27 @@ export class DataImportService {
     };
 
     const batchSize = options.batchSize || this.defaultBatchSize;
-    
+
     for (let i = 0; i < data.length; i += batchSize) {
       const batch = data.slice(i, i + batchSize);
-      await this.processBatch(
-        batch,
-        async (record, rowIndex) => {
-          try {
-            const mappedData = this.applyFieldMapping(record, options.mapping);
-            const task = await this.createTask(context, mappedData, rowIndex + i + 1);
-            result.importedIds.push(task.id);
-            result.successCount++;
-          } catch (error: any) {
-            result.errorCount++;
-            result.errors.push({
-              row: rowIndex + i + 1,
-              message: error.message,
-            });
-            
-            if (!options.skipErrors) {
-              throw error;
-            }
+      await this.processBatch(batch, async (record, rowIndex) => {
+        try {
+          const mappedData = this.applyFieldMapping(record, options.mapping);
+          const task = await this.createTask(context, mappedData, rowIndex + i + 1);
+          result.importedIds.push(task.id);
+          result.successCount++;
+        } catch (error: any) {
+          result.errorCount++;
+          result.errors.push({
+            row: rowIndex + i + 1,
+            message: error.message,
+          });
+
+          if (!options.skipErrors) {
+            throw error;
           }
         }
-      );
+      });
     }
 
     await this.auditService.log(prisma, {
@@ -216,10 +212,10 @@ export class DataImportService {
   async importLocations(
     context: IRequestContext,
     filePath: string,
-    options: ImportOptions
+    options: ImportOptions,
   ): Promise<ImportResult> {
     const data = await this.parseFile(filePath, options.format);
-    
+
     if (options.validateOnly) {
       const validation = await this.validateLocations(data, options.mapping);
       return {
@@ -249,14 +245,14 @@ export class DataImportService {
       try {
         const record = sortedData[i];
         const mappedData = this.applyFieldMapping(record, options.mapping);
-        
+
         // Update parent ID if it was mapped
         if (mappedData.parentId && locationMap.has(mappedData.parentId)) {
           mappedData.parentId = locationMap.get(mappedData.parentId);
         }
 
         const location = await this.createLocation(context, mappedData, i + 1);
-        
+
         // Store mapping if original ID exists
         if (record.id) {
           locationMap.set(record.id, location.id);
@@ -270,7 +266,7 @@ export class DataImportService {
           row: i + 1,
           message: error.message,
         });
-        
+
         if (!options.skipErrors) {
           throw error;
         }
@@ -299,7 +295,7 @@ export class DataImportService {
             trim: true,
           });
 
-          parser.on('readable', function() {
+          parser.on('readable', function () {
             let record;
             while ((record = parser.read()) !== null) {
               records.push(record);
@@ -582,7 +578,7 @@ export class DataImportService {
    */
   private async processBatch<T>(
     batch: T[],
-    processor: (record: T, index: number) => Promise<void>
+    processor: (record: T, index: number) => Promise<void>,
   ): Promise<void> {
     await Promise.all(batch.map((record, index) => processor(record, index)));
   }
@@ -613,7 +609,7 @@ export class DataImportService {
         data.tags = data.tags.split(',').map((tag: string) => tag.trim());
       }
 
-      const asset = await prisma.asset.create({
+      const asset = await this.prisma.asset.create({
         data: {
           ...data,
           organizationId: context.organizationId,
@@ -659,7 +655,7 @@ export class DataImportService {
         data.actualMinutes = Number(data.actualMinutes);
       }
 
-      const task = await prisma.task.create({
+      const task = await this.prisma.task.create({
         data: {
           ...data,
           organizationId: context.organizationId,
@@ -677,12 +673,16 @@ export class DataImportService {
   /**
    * Create location from imported data
    */
-  private async createLocation(context: IRequestContext, data: any, rowNumber: number): Promise<any> {
+  private async createLocation(
+    context: IRequestContext,
+    data: any,
+    rowNumber: number,
+  ): Promise<any> {
     try {
       // Calculate path based on parent
       let path = '/';
       if (data.parentId) {
-        const parent = await prisma.location.findFirst({
+        const parent = await this.prisma.location.findFirst({
           where: {
             id: data.parentId,
             organizationId: context.organizationId,
@@ -696,7 +696,7 @@ export class DataImportService {
         path = `${parent.path}${parent.id}/`;
       }
 
-      const location = await prisma.location.create({
+      const location = await this.prisma.location.create({
         data: {
           ...data,
           organizationId: context.organizationId,

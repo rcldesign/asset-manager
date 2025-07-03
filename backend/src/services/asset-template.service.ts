@@ -1,4 +1,4 @@
-import type { AssetTemplate, AssetCategory } from '@prisma/client';
+import type { AssetTemplate, AssetCategory, PrismaClient } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
@@ -53,13 +53,15 @@ export interface AssetTemplateSearchResult {
  * @class AssetTemplateService
  */
 export class AssetTemplateService {
+  private prisma: PrismaClient;
   private readonly ajv: Ajv;
 
   /**
    * Creates an instance of AssetTemplateService.
    * Initializes AJV validator with format support for JSON schema validation.
    */
-  constructor() {
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
     this.ajv = new Ajv({ allErrors: true, verbose: true });
     addFormats(this.ajv);
   }
@@ -151,7 +153,7 @@ export class AssetTemplateService {
     } = data;
 
     // Check if organization exists
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id: organizationId },
     });
 
@@ -165,7 +167,7 @@ export class AssetTemplateService {
     }
 
     // Check for name uniqueness within organization
-    const existingTemplate = await prisma.assetTemplate.findFirst({
+    const existingTemplate = await this.prisma.assetTemplate.findFirst({
       where: {
         organizationId,
         name,
@@ -177,7 +179,7 @@ export class AssetTemplateService {
     }
 
     // Create the template
-    const template = await prisma.assetTemplate.create({
+    const template = await this.prisma.assetTemplate.create({
       data: {
         name,
         description,
@@ -208,7 +210,7 @@ export class AssetTemplateService {
       where.organizationId = organizationId;
     }
 
-    return prisma.assetTemplate.findFirst({ where });
+    return this.prisma.assetTemplate.findFirst({ where });
   }
 
   /**
@@ -250,7 +252,7 @@ export class AssetTemplateService {
 
     // If updating critical fields (customFields or category), check if template is in use
     if ((customFields !== undefined || category !== undefined) && template.isActive) {
-      const assetCount = await prisma.asset.count({
+      const assetCount = await this.prisma.asset.count({
         where: { assetTemplateId: id, organizationId },
       });
 
@@ -268,7 +270,7 @@ export class AssetTemplateService {
 
     // Check for name uniqueness if name is being changed
     if (name && name !== template.name) {
-      const existingTemplate = await prisma.assetTemplate.findFirst({
+      const existingTemplate = await this.prisma.assetTemplate.findFirst({
         where: {
           organizationId,
           name,
@@ -282,7 +284,7 @@ export class AssetTemplateService {
     }
 
     // Update template
-    const updatedTemplate = await prisma.assetTemplate.update({
+    const updatedTemplate = await this.prisma.assetTemplate.update({
       where: { id },
       data: {
         name,
@@ -317,7 +319,7 @@ export class AssetTemplateService {
     }
 
     // Check if template is in use
-    const assetCount = await prisma.asset.count({
+    const assetCount = await this.prisma.asset.count({
       where: { assetTemplateId: id, organizationId },
     });
 
@@ -326,7 +328,7 @@ export class AssetTemplateService {
     }
 
     // Soft delete by marking as inactive
-    await prisma.assetTemplate.update({
+    await this.prisma.assetTemplate.update({
       where: { id },
       data: { isActive: false },
     });
@@ -367,7 +369,7 @@ export class AssetTemplateService {
     const cloneName = newName || `${original.name} (Copy)`;
 
     // Check name uniqueness
-    const existingTemplate = await prisma.assetTemplate.findFirst({
+    const existingTemplate = await this.prisma.assetTemplate.findFirst({
       where: {
         organizationId,
         name: cloneName,
@@ -384,7 +386,7 @@ export class AssetTemplateService {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, createdAt, updatedAt, ...dataToClone } = original;
 
-    return prisma.assetTemplate.create({
+    return this.prisma.assetTemplate.create({
       data: {
         ...dataToClone,
         name: cloneName,
@@ -480,8 +482,8 @@ export class AssetTemplateService {
       whereConditions.length === 1 ? whereConditions[0]! : { AND: whereConditions };
 
     // Execute query with transaction for consistency
-    const [templates, total] = await prisma.$transaction([
-      prisma.assetTemplate.findMany({
+    const [templates, total] = await this.prisma.$transaction([
+      this.prisma.assetTemplate.findMany({
         where,
         skip,
         take: limit,
@@ -489,7 +491,7 @@ export class AssetTemplateService {
           [sortBy]: sortOrder,
         },
       }),
-      prisma.assetTemplate.count({ where }),
+      this.prisma.assetTemplate.count({ where }),
     ]);
 
     return {
@@ -528,7 +530,7 @@ export class AssetTemplateService {
       where.isActive = true;
     }
 
-    return prisma.assetTemplate.findMany({
+    return this.prisma.assetTemplate.findMany({
       where,
       orderBy: { name: 'asc' },
     });
@@ -556,7 +558,7 @@ export class AssetTemplateService {
       where.organizationId = organizationId;
     }
 
-    return prisma.assetTemplate.findMany({
+    return this.prisma.assetTemplate.findMany({
       where,
       orderBy: { name: 'asc' },
     });
@@ -577,7 +579,7 @@ export class AssetTemplateService {
   async exportTemplates(
     organizationId: string,
   ): Promise<Omit<AssetTemplate, 'id' | 'organizationId' | 'createdAt' | 'updatedAt'>[]> {
-    const templates = await prisma.assetTemplate.findMany({
+    const templates = await this.prisma.assetTemplate.findMany({
       where: { organizationId, isActive: true },
       orderBy: { name: 'asc' },
     });
@@ -628,7 +630,7 @@ export class AssetTemplateService {
         const { name, description, category, defaultFields, customFields } = templateData;
 
         // Check if template already exists
-        const existing = await prisma.assetTemplate.findFirst({
+        const existing = await this.prisma.assetTemplate.findFirst({
           where: { organizationId, name },
         });
 
@@ -644,7 +646,7 @@ export class AssetTemplateService {
             let uniqueName = `${name} (Imported)`;
             let counter = 1;
             while (
-              await prisma.assetTemplate.findFirst({ where: { organizationId, name: uniqueName } })
+              await this.prisma.assetTemplate.findFirst({ where: { organizationId, name: uniqueName } })
             ) {
               uniqueName = `${name} (Imported ${counter++})`;
             }
@@ -712,9 +714,9 @@ export class AssetTemplateService {
       throw new NotFoundError('Asset template');
     }
 
-    const [assetCount, lastAsset] = await prisma.$transaction([
-      prisma.asset.count({ where: { assetTemplateId: id, organizationId } }),
-      prisma.asset.findFirst({
+    const [assetCount, lastAsset] = await this.prisma.$transaction([
+      this.prisma.asset.count({ where: { assetTemplateId: id, organizationId } }),
+      this.prisma.asset.findFirst({
         where: { assetTemplateId: id, organizationId },
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true },
@@ -757,7 +759,7 @@ export class AssetTemplateService {
     values: Record<string, unknown>,
     organizationId: string,
   ): Promise<{ valid: boolean; errors: string[] }> {
-    const template = await prisma.assetTemplate.findFirst({
+    const template = await this.prisma.assetTemplate.findFirst({
       where: { id: templateId, organizationId },
       select: { customFields: true },
     });

@@ -1,4 +1,4 @@
-import type { User } from '@prisma/client';
+import type { User, PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import * as speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
@@ -67,14 +67,16 @@ export interface SessionInfo {
  * @class AuthService
  */
 export class AuthService {
+  private prisma: PrismaClient;
   private userService: UserService;
 
   /**
    * Creates an instance of AuthService.
    * Initializes UserService dependency for authentication operations.
    */
-  constructor() {
-    this.userService = new UserService();
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+    this.userService = new UserService(prismaClient);
   }
 
   /**
@@ -206,7 +208,7 @@ export class AuthService {
     });
 
     // Store refresh token in database
-    await prisma.session.create({
+    await this.prisma.session.create({
       data: {
         userId: user.id,
         token: accessToken,
@@ -250,7 +252,7 @@ export class AuthService {
       jwt.verify(refreshToken, jwtRefreshSecret) as RefreshTokenPayload;
 
       // Find session in database
-      const session = await prisma.session.findUnique({
+      const session = await this.prisma.session.findUnique({
         where: { refreshToken },
         include: { user: true },
       });
@@ -267,7 +269,7 @@ export class AuthService {
       const newTokens = await this.generateTokens(session.user);
 
       // Remove old session
-      await prisma.session.delete({
+      await this.prisma.session.delete({
         where: { id: session.id },
       });
 
@@ -356,7 +358,7 @@ export class AuthService {
     });
 
     // Store secret temporarily (not enabled yet)
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { totpSecret: secret.base32 },
     });
@@ -419,7 +421,7 @@ export class AuthService {
     }
 
     // Enable TOTP
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { totpEnabled: true },
     });
@@ -457,7 +459,7 @@ export class AuthService {
     }
 
     // Disable TOTP and remove secret
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: {
         totpEnabled: false,
@@ -479,7 +481,7 @@ export class AuthService {
    * res.json({ message: 'Logged out successfully' });
    */
   async logout(refreshToken: string): Promise<void> {
-    await prisma.session.deleteMany({
+    await this.prisma.session.deleteMany({
       where: { refreshToken },
     });
   }
@@ -497,7 +499,7 @@ export class AuthService {
    * // User must re-authenticate on all devices
    */
   async logoutAll(userId: string): Promise<void> {
-    await prisma.session.deleteMany({
+    await this.prisma.session.deleteMany({
       where: { userId },
     });
   }
@@ -525,7 +527,7 @@ export class AuthService {
     // const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     // Store reset token (you might want a separate table for this)
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: user.id },
       data: {
         // You'll need to add resetToken and resetTokenExpiry fields to the schema
@@ -553,7 +555,7 @@ export class AuthService {
    * }
    */
   async validateSession(sessionToken: string): Promise<User | null> {
-    const session = await prisma.session.findUnique({
+    const session = await this.prisma.session.findUnique({
       where: { token: sessionToken },
       include: { user: true },
     });
@@ -581,7 +583,7 @@ export class AuthService {
    * });
    */
   async getUserSessions(userId: string): Promise<SessionInfo[]> {
-    const sessions = await prisma.session.findMany({
+    const sessions = await this.prisma.session.findMany({
       where: { userId },
       select: {
         id: true,
@@ -615,7 +617,7 @@ export class AuthService {
    * // That device will need to login again
    */
   async revokeSession(userId: string, sessionId: string): Promise<void> {
-    await prisma.session.deleteMany({
+    await this.prisma.session.deleteMany({
       where: {
         id: sessionId,
         userId,

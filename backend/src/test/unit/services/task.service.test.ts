@@ -1,9 +1,17 @@
 import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import type { Task, Organization, User, Asset, Schedule } from '@prisma/client';
 import { TaskStatus } from '@prisma/client';
-import { TaskService } from '../../../services/task.service';
 import { NotFoundError, ConflictError, ValidationError } from '../../../utils/errors';
-import { prismaMock } from '../../prisma-singleton';
+
+// Enable automatic mocking for Prisma
+jest.mock('../../../lib/prisma');
+
+// Import modules after mocking
+import { TaskService } from '../../../services/task.service';
+import { prisma } from '../../../lib/prisma';
+
+// Type the mocked modules
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 
 jest.mock('../../../utils/logger', () => ({
   logger: {
@@ -12,6 +20,7 @@ jest.mock('../../../utils/logger', () => ({
     error: jest.fn(),
   },
 }));
+
 
 describe('TaskService', () => {
   let taskService: TaskService;
@@ -31,6 +40,10 @@ describe('TaskService', () => {
     passwordHash: 'hash',
     role: 'MEMBER',
     fullName: 'Test User',
+    firstName: 'Test',
+    lastName: 'User',
+    avatarUrl: null,
+    lastActiveAt: null,
     organizationId: 'org-1',
     totpSecret: null,
     totpEnabled: false,
@@ -129,17 +142,17 @@ describe('TaskService', () => {
   };
 
   beforeEach(() => {
-    taskService = new TaskService();
+    taskService = new TaskService(mockPrisma);
     jest.clearAllMocks();
 
     // Set up default mock for $transaction
-    (prismaMock.$transaction as any).mockImplementation(async (queries: any) => {
+    (mockPrisma.$transaction as any).mockImplementation(async (queries: any) => {
       if (Array.isArray(queries)) {
         // Default behavior - return empty results
         return queries.map(() => []);
       }
       if (typeof queries === 'function') {
-        return queries(prismaMock);
+        return queries(mockPrisma);
       }
       throw new Error('Unexpected transaction call');
     });
@@ -173,10 +186,10 @@ describe('TaskService', () => {
         _count: { assignments: 1, comments: 0, attachments: 0 },
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue(mockOrganization);
-      prismaMock.asset.findFirst.mockResolvedValue(mockAsset);
-      prismaMock.user.findMany.mockResolvedValue([mockUser]);
-      (prismaMock.$transaction as any).mockImplementation(async (callback: any) => {
+      mockPrisma.organization.findUnique.mockResolvedValue(mockOrganization);
+      mockPrisma.asset.findFirst.mockResolvedValue(mockAsset);
+      mockPrisma.user.findMany.mockResolvedValue([mockUser]);
+      (mockPrisma.$transaction as any).mockImplementation(async (callback: any) => {
         const createFn = jest.fn() as any;
         createFn.mockResolvedValue(mockCreatedTask);
         const findUniqueFn = jest.fn() as any;
@@ -196,10 +209,10 @@ describe('TaskService', () => {
       const result = await taskService.createTask(createData);
 
       expect(result).toEqual(mockCreatedTask);
-      expect(prismaMock.organization.findUnique).toHaveBeenCalledWith({
+      expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
         where: { id: 'org-1' },
       });
-      expect(prismaMock.asset.findFirst).toHaveBeenCalledWith({
+      expect(mockPrisma.asset.findFirst).toHaveBeenCalledWith({
         where: { id: 'asset-1', organizationId: 'org-1' },
       });
     });
@@ -211,7 +224,7 @@ describe('TaskService', () => {
         dueDate: new Date(),
       };
 
-      (prismaMock.organization.findUnique as any).mockResolvedValue(null);
+      (mockPrisma.organization.findUnique as any).mockResolvedValue(null);
 
       await expect(taskService.createTask(createData)).rejects.toThrow(NotFoundError);
     });
@@ -224,8 +237,8 @@ describe('TaskService', () => {
         assetId: 'nonexistent-asset',
       };
 
-      (prismaMock.organization.findUnique as any).mockResolvedValue(mockOrganization);
-      (prismaMock.asset.findFirst as any).mockResolvedValue(null);
+      (mockPrisma.organization.findUnique as any).mockResolvedValue(mockOrganization);
+      (mockPrisma.asset.findFirst as any).mockResolvedValue(null);
 
       await expect(taskService.createTask(createData)).rejects.toThrow(NotFoundError);
     });
@@ -238,8 +251,8 @@ describe('TaskService', () => {
         assignUserIds: ['nonexistent-user'],
       };
 
-      (prismaMock.organization.findUnique as any).mockResolvedValue(mockOrganization);
-      (prismaMock.user.findMany as any).mockResolvedValue([]);
+      (mockPrisma.organization.findUnique as any).mockResolvedValue(mockOrganization);
+      (mockPrisma.user.findMany as any).mockResolvedValue([]);
 
       await expect(taskService.createTask(createData)).rejects.toThrow(ValidationError);
     });
@@ -255,12 +268,12 @@ describe('TaskService', () => {
         _count: { assignments: 0, comments: 0, attachments: 0 },
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(mockTaskWithRelations);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(mockTaskWithRelations);
 
       const result = await taskService.getTaskById('task-1', 'org-1');
 
       expect(result).toEqual(mockTaskWithRelations);
-      expect(prismaMock.task.findFirst).toHaveBeenCalledWith({
+      expect(mockPrisma.task.findFirst).toHaveBeenCalledWith({
         where: { id: 'task-1', organizationId: 'org-1' },
         include: expect.objectContaining({
           asset: { select: { id: true, name: true, category: true } },
@@ -271,7 +284,7 @@ describe('TaskService', () => {
     });
 
     test('should return null when task not found', async () => {
-      (prismaMock.task.findFirst as any).mockResolvedValue(null);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(null);
 
       const result = await taskService.getTaskById('nonexistent-task', 'org-1');
 
@@ -299,13 +312,13 @@ describe('TaskService', () => {
         status: 'IN_PROGRESS',
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(mockExistingTask);
-      (prismaMock.task.update as any).mockResolvedValue(mockUpdatedTask);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(mockExistingTask);
+      (mockPrisma.task.update as any).mockResolvedValue(mockUpdatedTask);
 
       const result = await taskService.updateTask('task-1', 'org-1', updateData);
 
       expect(result).toEqual(mockUpdatedTask);
-      expect(prismaMock.task.update).toHaveBeenCalledWith({
+      expect(mockPrisma.task.update).toHaveBeenCalledWith({
         where: { id: 'task-1' },
         data: expect.objectContaining({
           title: 'Updated Task',
@@ -316,7 +329,7 @@ describe('TaskService', () => {
     });
 
     test('should throw NotFoundError when task does not exist', async () => {
-      (prismaMock.task.findFirst as any).mockResolvedValue(null);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(null);
 
       await expect(
         taskService.updateTask('nonexistent-task', 'org-1', { title: 'New Title' }),
@@ -332,7 +345,7 @@ describe('TaskService', () => {
         _count: { assignments: 0, comments: 0, attachments: 0 },
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(mockExistingTask);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(mockExistingTask);
 
       await expect(
         taskService.updateTask('task-1', 'org-1', { status: 'PLANNED' as TaskStatus }),
@@ -354,12 +367,12 @@ describe('TaskService', () => {
         completedAt: new Date(),
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(mockExistingTask);
-      (prismaMock.task.update as any).mockResolvedValue(mockUpdatedTask);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(mockExistingTask);
+      (mockPrisma.task.update as any).mockResolvedValue(mockUpdatedTask);
 
       await taskService.updateTask('task-1', 'org-1', { status: 'DONE' as TaskStatus });
 
-      expect(prismaMock.task.update).toHaveBeenCalledWith({
+      expect(mockPrisma.task.update).toHaveBeenCalledWith({
         where: { id: 'task-1' },
         data: expect.objectContaining({
           status: 'DONE',
@@ -381,16 +394,16 @@ describe('TaskService', () => {
         _count: { assignments: 0, comments: 0, attachments: 0 },
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(mockTaskForDelete);
-      (prismaMock.task.delete as any).mockResolvedValue(mockTask);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(mockTaskForDelete);
+      (mockPrisma.task.delete as any).mockResolvedValue(mockTask);
 
       await taskService.deleteTask('task-1', 'org-1');
 
-      expect(prismaMock.task.delete).toHaveBeenCalledWith({ where: { id: 'task-1' } });
+      expect(mockPrisma.task.delete).toHaveBeenCalledWith({ where: { id: 'task-1' } });
     });
 
     test('should throw NotFoundError when task does not exist', async () => {
-      (prismaMock.task.findFirst as any).mockResolvedValue(null);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(null);
 
       await expect(taskService.deleteTask('nonexistent-task', 'org-1')).rejects.toThrow(
         NotFoundError,
@@ -406,8 +419,8 @@ describe('TaskService', () => {
         _count: { assignments: 0, comments: 0, attachments: 0 },
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(mockTaskWithActiveSchedule);
-      (prismaMock.schedule.findFirst as any).mockResolvedValue({ ...mockSchedule, isActive: true });
+      (mockPrisma.task.findFirst as any).mockResolvedValue(mockTaskWithActiveSchedule);
+      (mockPrisma.schedule.findFirst as any).mockResolvedValue({ ...mockSchedule, isActive: true });
 
       await expect(taskService.deleteTask('task-1', 'org-1')).rejects.toThrow(ConflictError);
     });
@@ -425,13 +438,13 @@ describe('TaskService', () => {
       ];
 
       // Mock Prisma methods
-      (prismaMock.task.findMany as any).mockReturnValue({
+      (mockPrisma.task.findMany as any).mockReturnValue({
         then: (resolve: any) => resolve(mockTasks),
       });
-      (prismaMock.task.count as any).mockReturnValue({ then: (resolve: any) => resolve(1) });
+      (mockPrisma.task.count as any).mockReturnValue({ then: (resolve: any) => resolve(1) });
 
       // Mock the $transaction to return array results
-      (prismaMock.$transaction as any).mockImplementation(async (queries: any) => {
+      (mockPrisma.$transaction as any).mockImplementation(async (queries: any) => {
         if (Array.isArray(queries)) {
           // Execute the promise-like objects
           return Promise.all(queries);
@@ -468,13 +481,13 @@ describe('TaskService', () => {
       ];
 
       // Mock Prisma methods
-      (prismaMock.task.findMany as any).mockReturnValue({
+      (mockPrisma.task.findMany as any).mockReturnValue({
         then: (resolve: any) => resolve(mockTasks),
       });
-      (prismaMock.task.count as any).mockReturnValue({ then: (resolve: any) => resolve(1) });
+      (mockPrisma.task.count as any).mockReturnValue({ then: (resolve: any) => resolve(1) });
 
       // Mock the $transaction to return array results
-      (prismaMock.$transaction as any).mockImplementation(async (queries: any) => {
+      (mockPrisma.$transaction as any).mockImplementation(async (queries: any) => {
         if (Array.isArray(queries)) {
           // Execute the promise-like objects
           return Promise.all(queries);
@@ -485,7 +498,7 @@ describe('TaskService', () => {
       await taskService.findTasks('org-1', { isOverdue: true });
 
       // Check that findMany was called with correct overdue filter
-      expect(prismaMock.task.findMany).toHaveBeenCalledWith(
+      expect(mockPrisma.task.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             AND: expect.arrayContaining([
@@ -524,12 +537,12 @@ describe('TaskService', () => {
         _count: { assignments: 1, comments: 0, attachments: 0 },
       };
 
-      (prismaMock.task.findFirst as any)
+      (mockPrisma.task.findFirst as any)
         .mockResolvedValueOnce(mockTaskForAssignment) // First call for validation
         .mockResolvedValueOnce(mockUpdatedTask); // Second call for return value
 
-      (prismaMock.user.findMany as any).mockResolvedValue([mockUser]);
-      (prismaMock.$transaction as any).mockImplementation(async (callback: any) => {
+      (mockPrisma.user.findMany as any).mockResolvedValue([mockUser]);
+      (mockPrisma.$transaction as any).mockImplementation(async (callback: any) => {
         const tx = {
           taskAssignment: {
             deleteMany: jest.fn(),
@@ -552,8 +565,8 @@ describe('TaskService', () => {
         _count: { assignments: 0, comments: 0, attachments: 0 },
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(mockTaskForAssignment);
-      (prismaMock.user.findMany as any).mockResolvedValue([]);
+      (mockPrisma.task.findFirst as any).mockResolvedValue(mockTaskForAssignment);
+      (mockPrisma.user.findMany as any).mockResolvedValue([]);
 
       await expect(
         taskService.assignUsersToTask('task-1', 'org-1', ['nonexistent-user']),
@@ -579,17 +592,18 @@ describe('TaskService', () => {
         user: { id: 'user-1', email: 'test@example.com', fullName: 'Test User' },
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue({
+      (mockPrisma.task.findUnique as any).mockResolvedValue({
         ...mockTask,
+        organizationId: mockOrganization.id,
         organization: mockOrganization,
       });
-      (prismaMock.user.findFirst as any).mockResolvedValue(mockUser);
-      (prismaMock.taskComment.create as any).mockResolvedValue(mockCreatedComment);
+      (mockPrisma.user.findFirst as any).mockResolvedValue(mockUser);
+      (mockPrisma.taskComment.create as any).mockResolvedValue(mockCreatedComment);
 
       const result = await taskService.createTaskComment(commentData);
 
       expect(result).toEqual(mockCreatedComment);
-      expect(prismaMock.taskComment.create).toHaveBeenCalledWith({
+      expect(mockPrisma.taskComment.create).toHaveBeenCalledWith({
         data: {
           taskId: 'task-1',
           userId: 'user-1',
@@ -608,7 +622,7 @@ describe('TaskService', () => {
         content: 'Test comment',
       };
 
-      (prismaMock.task.findFirst as any).mockResolvedValue(null);
+      (mockPrisma.task.findUnique as any).mockResolvedValue(null);
 
       await expect(taskService.createTaskComment(commentData)).rejects.toThrow(NotFoundError);
     });
@@ -617,8 +631,8 @@ describe('TaskService', () => {
   describe('getTaskStatistics', () => {
     test('should return comprehensive task statistics', async () => {
       // Mock individual Prisma calls
-      (prismaMock.task.count as any).mockResolvedValueOnce(5); // total
-      (prismaMock.task.groupBy as any)
+      (mockPrisma.task.count as any).mockResolvedValueOnce(5); // total
+      (mockPrisma.task.groupBy as any)
         .mockResolvedValueOnce([
           { status: 'PLANNED', _count: 2 },
           { status: 'DONE', _count: 3 },
@@ -627,10 +641,10 @@ describe('TaskService', () => {
           { priority: 'HIGH', _count: 1 },
           { priority: 'MEDIUM', _count: 4 },
         ]); // byPriority
-      (prismaMock.task.count as any)
+      (mockPrisma.task.count as any)
         .mockResolvedValueOnce(1) // overdue
         .mockResolvedValueOnce(2); // dueSoon
-      (prismaMock.task.findMany as any).mockResolvedValueOnce([
+      (mockPrisma.task.findMany as any).mockResolvedValueOnce([
         { actualMinutes: 60 },
         { actualMinutes: 120 },
       ]); // completedTasks

@@ -1,11 +1,12 @@
-import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { BackupService } from '../../../services/backup.service';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { promises as fs } from 'fs';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import archiver from 'archiver';
 import type { User } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import { NotFoundError, ForbiddenError, ValidationError } from '../../../utils/errors';
+
+// Enable automatic mocking for Prisma
+jest.mock('../../../lib/prisma');
 
 // Mock dependencies
 jest.mock('fs', () => ({
@@ -24,9 +25,7 @@ jest.mock('fs', () => ({
 }));
 
 jest.mock('child_process', () => ({
-  exec: jest.fn((cmd, callback) => {
-    if (callback) callback(null, '', '');
-  }),
+  exec: jest.fn(),
 }));
 
 jest.mock('util', () => ({
@@ -55,27 +54,50 @@ jest.mock('../../../utils/logger', () => ({
   },
 }));
 
+// Import modules after mocking
+import { BackupService } from '../../../services/backup.service';
+import { prisma } from '../../../lib/prisma';
+
+// Type the mocked modules
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+
+// Helper function to create a mock user with all required fields
+const createMockUser = (overrides: Partial<any> = {}): User => ({
+  id: 'user-123',
+  email: 'test@example.com',
+  passwordHash: 'hashed-password',
+  fullName: 'Test User',
+  firstName: 'Test',
+  lastName: 'User',
+  avatarUrl: null,
+  lastActiveAt: null,
+  role: UserRole.OWNER,
+  organizationId: 'org-123',
+  emailVerified: true,
+  isActive: true,
+  totpEnabled: false,
+  totpSecret: null,
+  notificationPreferences: {},
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
+
 describe('BackupService', () => {
   let backupService: BackupService;
   let mockUser: User;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    backupService = new BackupService();
-    mockUser = {
-      id: 'user-123',
-      email: 'test@example.com',
-      organizationId: 'org-123',
-      role: 'OWNER',
-      fullName: 'Test User',
-      isActive: true,
-      password: 'hashed',
-      totpEnabled: false,
-      totpSecret: null,
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    
+    // Mock Prisma methods used by BackupService
+    (mockPrisma as any).asset = { count: jest.fn().mockResolvedValue(10) };
+    (mockPrisma as any).task = { count: jest.fn().mockResolvedValue(5) };
+    (mockPrisma as any).user = { count: jest.fn().mockResolvedValue(3) };
+    (mockPrisma as any).taskAttachment = { count: jest.fn().mockResolvedValue(8) };
+    
+    backupService = new BackupService(mockPrisma);
+    mockUser = createMockUser();
   });
 
   describe('createBackup', () => {
@@ -85,7 +107,7 @@ describe('BackupService', () => {
         directory: jest.fn(),
         finalize: jest.fn().mockResolvedValue(undefined),
       };
-      
+
       const mockWriteStream = {
         on: jest.fn((event, callback) => {
           if (event === 'close') callback();
@@ -131,7 +153,7 @@ describe('BackupService', () => {
         directory: jest.fn(),
         finalize: jest.fn().mockResolvedValue(undefined),
       };
-      
+
       const mockWriteStream = {
         on: jest.fn((event, callback) => {
           if (event === 'close') callback();
@@ -167,7 +189,7 @@ describe('BackupService', () => {
       (fs.mkdir as jest.Mock).mockRejectedValue(new Error('Failed to create directory'));
 
       await expect(
-        backupService.createBackup(mockUser, 'org-123', { type: 'full' })
+        backupService.createBackup(mockUser, 'org-123', { type: 'full' }),
       ).rejects.toThrow('Failed to create directory');
     });
   });
@@ -179,9 +201,9 @@ describe('BackupService', () => {
         'backup-456.zip',
         'other-file.txt',
       ]);
-      
+
       (fs.stat as jest.Mock).mockResolvedValue({ size: 1024000 });
-      
+
       // Mock extractMetadata to return different metadata for each backup
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy
@@ -239,19 +261,19 @@ describe('BackupService', () => {
       (fs.access as jest.Mock).mockResolvedValue(undefined);
       (fs.mkdir as jest.Mock).mockResolvedValue(undefined);
       (fs.rm as jest.Mock).mockResolvedValue(undefined);
-      
+
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy.mockResolvedValue(mockMetadata);
-      
+
       const calculateChecksumSpy = jest.spyOn(backupService as any, 'calculateChecksum');
       calculateChecksumSpy.mockResolvedValue('abc123');
-      
+
       const extractBackupSpy = jest.spyOn(backupService as any, 'extractBackup');
       extractBackupSpy.mockResolvedValue(undefined);
-      
+
       const restoreDatabaseSpy = jest.spyOn(backupService as any, 'restoreDatabase');
       restoreDatabaseSpy.mockResolvedValue(undefined);
-      
+
       const restoreFilesSpy = jest.spyOn(backupService as any, 'restoreFiles');
       restoreFilesSpy.mockResolvedValue(undefined);
 
@@ -267,9 +289,9 @@ describe('BackupService', () => {
     it('should throw NotFoundError if backup does not exist', async () => {
       (fs.access as jest.Mock).mockRejectedValue(new Error('File not found'));
 
-      await expect(
-        backupService.restoreBackup('123', mockUser, 'org-123')
-      ).rejects.toThrow(NotFoundError);
+      await expect(backupService.restoreBackup('123', mockUser, 'org-123')).rejects.toThrow(
+        NotFoundError,
+      );
     });
 
     it('should throw ForbiddenError if backup belongs to different organization', async () => {
@@ -280,13 +302,13 @@ describe('BackupService', () => {
       };
 
       (fs.access as jest.Mock).mockResolvedValue(undefined);
-      
+
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy.mockResolvedValue(mockMetadata);
 
-      await expect(
-        backupService.restoreBackup('123', mockUser, 'org-123')
-      ).rejects.toThrow(ForbiddenError);
+      await expect(backupService.restoreBackup('123', mockUser, 'org-123')).rejects.toThrow(
+        ForbiddenError,
+      );
     });
 
     it('should throw ValidationError if checksum validation fails', async () => {
@@ -297,17 +319,17 @@ describe('BackupService', () => {
       };
 
       (fs.access as jest.Mock).mockResolvedValue(undefined);
-      
+
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy.mockResolvedValue(mockMetadata);
-      
+
       const calculateChecksumSpy = jest.spyOn(backupService as any, 'calculateChecksum');
       calculateChecksumSpy.mockResolvedValue('different-checksum');
 
       await expect(
         backupService.restoreBackup('123', mockUser, 'org-123', {
           validateChecksum: true,
-        })
+        }),
       ).rejects.toThrow(ValidationError);
     });
 
@@ -321,13 +343,13 @@ describe('BackupService', () => {
       };
 
       (fs.access as jest.Mock).mockResolvedValue(undefined);
-      
+
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy.mockResolvedValue(mockMetadata);
-      
+
       const calculateChecksumSpy = jest.spyOn(backupService as any, 'calculateChecksum');
       calculateChecksumSpy.mockResolvedValue('abc123');
-      
+
       const extractBackupSpy = jest.spyOn(backupService as any, 'extractBackup');
       const restoreDatabaseSpy = jest.spyOn(backupService as any, 'restoreDatabase');
       const restoreFilesSpy = jest.spyOn(backupService as any, 'restoreFiles');
@@ -351,7 +373,7 @@ describe('BackupService', () => {
 
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy.mockResolvedValue(mockMetadata);
-      
+
       (fs.unlink as jest.Mock).mockResolvedValue(undefined);
 
       await backupService.deleteBackup('123', 'org-123');
@@ -368,18 +390,14 @@ describe('BackupService', () => {
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy.mockResolvedValue(mockMetadata);
 
-      await expect(
-        backupService.deleteBackup('123', 'org-123')
-      ).rejects.toThrow(ForbiddenError);
+      await expect(backupService.deleteBackup('123', 'org-123')).rejects.toThrow(ForbiddenError);
     });
 
     it('should throw NotFoundError if backup does not exist', async () => {
       const extractMetadataSpy = jest.spyOn(backupService as any, 'extractMetadata');
       extractMetadataSpy.mockRejectedValue(new Error('File not found'));
 
-      await expect(
-        backupService.deleteBackup('123', 'org-123')
-      ).rejects.toThrow(NotFoundError);
+      await expect(backupService.deleteBackup('123', 'org-123')).rejects.toThrow(NotFoundError);
     });
   });
 });

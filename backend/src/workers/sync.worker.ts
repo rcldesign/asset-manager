@@ -17,7 +17,7 @@ async function processSyncJob(job: Job<SyncJob>): Promise<void> {
     jobId: job.id,
     type,
     clientId,
-    itemCount: itemIds?.length || 0
+    itemCount: itemIds?.length || 0,
   });
 
   try {
@@ -49,7 +49,7 @@ async function processSyncJob(job: Job<SyncJob>): Promise<void> {
     logger.info('Sync job completed successfully', { jobId: job.id });
   } catch (error) {
     logger.error('Sync job failed', error instanceof Error ? error : undefined, {
-      jobId: job.id
+      jobId: job.id,
     });
     throw error;
   }
@@ -62,7 +62,7 @@ async function processBatchSync(clientId: string, itemIds: string[]): Promise<vo
   // Get sync client info
   const client = await prisma.syncClient.findUnique({
     where: { id: clientId },
-    include: { user: true }
+    include: { user: true },
   });
 
   if (!client) {
@@ -73,17 +73,17 @@ async function processBatchSync(clientId: string, itemIds: string[]): Promise<vo
   const batchSize = 10;
   for (let i = 0; i < itemIds.length; i += batchSize) {
     const batch = itemIds.slice(i, i + batchSize);
-    
+
     await Promise.all(
       batch.map(async (itemId) => {
         try {
           await processSyncItem(client.userId, itemId);
         } catch (error) {
           logger.error('Failed to process sync item', error instanceof Error ? error : undefined, {
-            itemId
+            itemId,
           });
         }
-      })
+      }),
     );
   }
 }
@@ -94,7 +94,7 @@ async function processBatchSync(clientId: string, itemIds: string[]): Promise<vo
 async function processCriticalSync(clientId: string, itemIds: string[]): Promise<void> {
   const client = await prisma.syncClient.findUnique({
     where: { id: clientId },
-    include: { user: true }
+    include: { user: true },
   });
 
   if (!client) {
@@ -107,12 +107,16 @@ async function processCriticalSync(clientId: string, itemIds: string[]): Promise
       try {
         await processSyncItem(client.userId, itemId, true);
       } catch (error) {
-        logger.error('Failed to process critical sync item', error instanceof Error ? error : undefined, {
-          itemId
-        });
+        logger.error(
+          'Failed to process critical sync item',
+          error instanceof Error ? error : undefined,
+          {
+            itemId,
+          },
+        );
         // Don't throw - continue processing other items
       }
-    })
+    }),
   );
 }
 
@@ -122,11 +126,11 @@ async function processCriticalSync(clientId: string, itemIds: string[]): Promise
 async function processTypeSync(
   clientId: string,
   entityType: string,
-  itemIds: string[]
+  itemIds: string[],
 ): Promise<void> {
   const client = await prisma.syncClient.findUnique({
     where: { id: clientId },
-    include: { user: true }
+    include: { user: true },
   });
 
   if (!client) {
@@ -136,7 +140,7 @@ async function processTypeSync(
   logger.info('Processing type-specific sync', {
     clientId,
     entityType,
-    itemCount: itemIds.length
+    itemCount: itemIds.length,
   });
 
   // Process items of specific type
@@ -144,10 +148,14 @@ async function processTypeSync(
     try {
       await processSyncItem(client.userId, itemId);
     } catch (error) {
-      logger.error('Failed to process typed sync item', error instanceof Error ? error : undefined, {
-        itemId,
-        entityType
-      });
+      logger.error(
+        'Failed to process typed sync item',
+        error instanceof Error ? error : undefined,
+        {
+          itemId,
+          entityType,
+        },
+      );
     }
   }
 }
@@ -155,14 +163,10 @@ async function processTypeSync(
 /**
  * Process custom sync based on tag
  */
-async function processCustomSync(
-  clientId: string,
-  tag: string,
-  itemIds: string[]
-): Promise<void> {
+async function processCustomSync(clientId: string, tag: string, itemIds: string[]): Promise<void> {
   const client = await prisma.syncClient.findUnique({
     where: { id: clientId },
-    include: { user: true }
+    include: { user: true },
   });
 
   if (!client) {
@@ -172,7 +176,7 @@ async function processCustomSync(
   logger.info('Processing custom sync', {
     clientId,
     tag,
-    itemCount: itemIds.length
+    itemCount: itemIds.length,
   });
 
   // Process custom sync items
@@ -180,10 +184,14 @@ async function processCustomSync(
     try {
       await processSyncItem(client.userId, itemId);
     } catch (error) {
-      logger.error('Failed to process custom sync item', error instanceof Error ? error : undefined, {
-        itemId,
-        tag
-      });
+      logger.error(
+        'Failed to process custom sync item',
+        error instanceof Error ? error : undefined,
+        {
+          itemId,
+          tag,
+        },
+      );
     }
   }
 }
@@ -194,7 +202,7 @@ async function processCustomSync(
 async function processRetrySync(clientId: string, itemIds: string[]): Promise<void> {
   const client = await prisma.syncClient.findUnique({
     where: { id: clientId },
-    include: { user: true }
+    include: { user: true },
   });
 
   if (!client) {
@@ -203,7 +211,7 @@ async function processRetrySync(clientId: string, itemIds: string[]): Promise<vo
 
   logger.info('Retrying failed sync items', {
     clientId,
-    itemCount: itemIds.length
+    itemCount: itemIds.length,
   });
 
   for (const itemId of itemIds) {
@@ -211,7 +219,7 @@ async function processRetrySync(clientId: string, itemIds: string[]): Promise<vo
       await processSyncItem(client.userId, itemId, false);
     } catch (error) {
       logger.error('Failed to retry sync item', error instanceof Error ? error : undefined, {
-        itemId
+        itemId,
       });
     }
   }
@@ -223,11 +231,11 @@ async function processRetrySync(clientId: string, itemIds: string[]): Promise<vo
 async function processSyncItem(
   userId: string,
   itemId: string,
-  isCritical: boolean = false
+  isCritical: boolean = false,
 ): Promise<void> {
   const item = await prisma.syncQueue.findUnique({
     where: { id: itemId },
-    include: { client: true }
+    include: { client: true },
   });
 
   if (!item) {
@@ -244,22 +252,18 @@ async function processSyncItem(
     // Update status to syncing
     await prisma.syncQueue.update({
       where: { id: itemId },
-      data: { status: 'SYNCING' }
+      data: { status: 'SYNCING' },
     });
 
     // Process the sync change
-    const conflict = await syncService.processClientChange(
-      item.clientId,
-      userId,
-      {
-        entityType: item.entityType,
-        entityId: item.entityId,
-        operation: item.operation,
-        payload: item.payload,
-        clientVersion: item.clientVersion,
-        timestamp: item.createdAt.toISOString()
-      }
-    );
+    const conflict = await syncService.processClientChange(item.clientId, userId, {
+      entityType: item.entityType,
+      entityId: item.entityId,
+      operation: item.operation,
+      payload: item.payload,
+      clientVersion: item.clientVersion,
+      timestamp: item.createdAt.toISOString(),
+    });
 
     if (conflict) {
       // Handle conflict
@@ -267,14 +271,14 @@ async function processSyncItem(
         where: { id: itemId },
         data: {
           status: 'CONFLICT',
-          conflictData: conflict as any
-        }
+          conflictData: conflict as any,
+        },
       });
 
       logger.warn('Sync conflict detected', {
         itemId,
         entityType: item.entityType,
-        entityId: item.entityId
+        entityId: item.entityId,
       });
     } else {
       // Mark as completed
@@ -282,8 +286,8 @@ async function processSyncItem(
         where: { id: itemId },
         data: {
           status: 'COMPLETED',
-          processedAt: new Date()
-        }
+          processedAt: new Date(),
+        },
       });
 
       logger.debug('Sync item processed successfully', { itemId });
@@ -298,13 +302,13 @@ async function processSyncItem(
       data: {
         status: retryCount >= maxRetries ? 'FAILED' : 'PENDING',
         retryCount,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error'
-      }
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      },
     });
 
     logger.error('Failed to process sync item', error instanceof Error ? error : undefined, {
       itemId,
-      retryCount
+      retryCount,
     });
 
     if (retryCount >= maxRetries) {
@@ -322,7 +326,7 @@ async function processSyncItem(
 async function notifySyncFailure(userId: string, item: any): Promise<void> {
   try {
     const user = await prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) return;
@@ -337,29 +341,29 @@ async function notifySyncFailure(userId: string, item: any): Promise<void> {
         data: {
           entityType: item.entityType,
           entityId: item.entityId,
-          operation: item.operation
-        }
-      }
+          operation: item.operation,
+        },
+      },
     });
   } catch (error) {
-    logger.error('Failed to create sync failure notification', error instanceof Error ? error : undefined, {
-      userId,
-      itemId: item.id
-    });
+    logger.error(
+      'Failed to create sync failure notification',
+      error instanceof Error ? error : undefined,
+      {
+        userId,
+        itemId: item.id,
+      },
+    );
   }
 }
 
 // Create and export the worker
-export const syncWorker = new Worker<SyncJob>(
-  'sync',
-  processSyncJob,
-  {
-    connection: createRedisConnection(),
-    concurrency: 5,
-    lockDuration: 60000, // 1 minute
-    lockRenewTime: 30000, // 30 seconds
-  }
-);
+export const syncWorker = new Worker<SyncJob>('sync', processSyncJob, {
+  connection: createRedisConnection(),
+  concurrency: 5,
+  lockDuration: 60000, // 1 minute
+  lockRenewTime: 30000, // 30 seconds
+});
 
 // Worker event handlers
 syncWorker.on('completed', (job) => {
@@ -368,7 +372,7 @@ syncWorker.on('completed', (job) => {
 
 syncWorker.on('failed', (job, error) => {
   logger.error('Sync job failed', error, {
-    jobId: job?.id
+    jobId: job?.id,
   });
 });
 

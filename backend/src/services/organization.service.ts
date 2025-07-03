@@ -1,4 +1,4 @@
-import type { Organization, User } from '@prisma/client';
+import type { Organization, User, PrismaClient } from '@prisma/client';
 import { UserRole } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError } from '../utils/errors';
@@ -24,6 +24,11 @@ export interface UpdateOrganizationData {
  * @class OrganizationService
  */
 export class OrganizationService {
+  private prisma: PrismaClient;
+
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+  }
   /**
    * Create a new organization without an owner.
    * Used for system-level organization creation.
@@ -38,7 +43,7 @@ export class OrganizationService {
    * });
    */
   async createOrganization(data: { name: string }): Promise<Organization> {
-    return prisma.organization.create({
+    return this.prisma.organization.create({
       data: { name: data.name },
     });
   }
@@ -66,7 +71,7 @@ export class OrganizationService {
     const { name, ownerEmail, ownerPassword, ownerFullName } = data;
 
     // Check if email is already in use
-    const existingUser = await prisma.user.findUnique({
+    const existingUser = await this.prisma.user.findUnique({
       where: { email: ownerEmail.toLowerCase() },
     });
 
@@ -75,7 +80,7 @@ export class OrganizationService {
     }
 
     // Create organization and owner in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Create organization without owner first
       const organization = await tx.organization.create({
         data: { name },
@@ -120,7 +125,7 @@ export class OrganizationService {
    * }
    */
   async getOrganizationById(id: string): Promise<Organization | null> {
-    return prisma.organization.findUnique({
+    return this.prisma.organization.findUnique({
       where: { id },
       include: {
         owner: true,
@@ -168,7 +173,7 @@ export class OrganizationService {
       : {};
 
     const [organizations, total] = await Promise.all([
-      prisma.organization.findMany({
+      this.prisma.organization.findMany({
         where,
         skip: options?.skip,
         take: options?.take,
@@ -184,7 +189,7 @@ export class OrganizationService {
         },
         orderBy: { createdAt: 'desc' },
       }),
-      prisma.organization.count({ where }),
+      this.prisma.organization.count({ where }),
     ]);
 
     return { organizations, total };
@@ -206,7 +211,7 @@ export class OrganizationService {
    * );
    */
   async updateOrganization(id: string, data: UpdateOrganizationData): Promise<Organization> {
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id },
     });
 
@@ -214,7 +219,7 @@ export class OrganizationService {
       throw new AppError('Organization not found', 404);
     }
 
-    return prisma.organization.update({
+    return this.prisma.organization.update({
       where: { id },
       data,
       include: {
@@ -243,7 +248,7 @@ export class OrganizationService {
    * // All related data is permanently deleted
    */
   async deleteOrganization(id: string): Promise<void> {
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id },
     });
 
@@ -252,7 +257,7 @@ export class OrganizationService {
     }
 
     // Delete organization (cascade will handle related data)
-    await prisma.organization.delete({
+    await this.prisma.organization.delete({
       where: { id },
     });
   }
@@ -286,7 +291,7 @@ export class OrganizationService {
     usersByRole: Record<string, number>;
     organizationAge: number;
   }> {
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id },
     });
 
@@ -296,16 +301,16 @@ export class OrganizationService {
 
     const [totalUsers, activeUsers, totalAssets, totalTasks, tasksByStatus, usersByRole] =
       await Promise.all([
-        prisma.user.count({ where: { organizationId: id } }),
-        prisma.user.count({ where: { organizationId: id, isActive: true } }),
-        prisma.asset.count({ where: { organizationId: id } }),
-        prisma.task.count({ where: { organizationId: id } }),
-        prisma.task.groupBy({
+        this.prisma.user.count({ where: { organizationId: id } }),
+        this.prisma.user.count({ where: { organizationId: id, isActive: true } }),
+        this.prisma.asset.count({ where: { organizationId: id } }),
+        this.prisma.task.count({ where: { organizationId: id } }),
+        this.prisma.task.groupBy({
           by: ['status'],
           where: { organizationId: id },
           _count: true,
         }),
-        prisma.user.groupBy({
+        this.prisma.user.groupBy({
           by: ['role'],
           where: { organizationId: id },
           _count: true,
@@ -363,7 +368,7 @@ export class OrganizationService {
     currentOwnerId: string,
   ): Promise<Organization> {
     // Verify organization exists
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id: organizationId },
       include: { owner: true },
     });
@@ -378,7 +383,7 @@ export class OrganizationService {
     }
 
     // Verify new owner exists and belongs to the organization
-    const newOwner = await prisma.user.findFirst({
+    const newOwner = await this.prisma.user.findFirst({
       where: {
         id: newOwnerId,
         organizationId: organizationId,
@@ -390,7 +395,7 @@ export class OrganizationService {
     }
 
     // Transfer ownership in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Update new owner role to OWNER
       await tx.user.update({
         where: { id: newOwnerId },
@@ -435,7 +440,7 @@ export class OrganizationService {
    */
   async setOwner(organizationId: string, userId: string): Promise<void> {
     // Verify organization exists
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id: organizationId },
     });
 
@@ -444,7 +449,7 @@ export class OrganizationService {
     }
 
     // Verify user exists
-    const user = await prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: {
         id: userId,
         organizationId: organizationId,
@@ -456,13 +461,13 @@ export class OrganizationService {
     }
 
     // Update organization owner
-    await prisma.organization.update({
+    await this.prisma.organization.update({
       where: { id: organizationId },
       data: { ownerUserId: userId },
     });
 
     // Update user role to OWNER
-    await prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: { role: UserRole.OWNER },
     });
@@ -480,7 +485,7 @@ export class OrganizationService {
    * console.log(`Organization has ${members.length} members`);
    */
   async getMembers(organizationId: string): Promise<User[]> {
-    return prisma.user.findMany({
+    return this.prisma.user.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
     });
@@ -517,7 +522,7 @@ export class OrganizationService {
     },
   ): Promise<User> {
     // Verify organization exists
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id: organizationId },
     });
 
@@ -531,7 +536,7 @@ export class OrganizationService {
     }
 
     // Create user
-    const userService = new UserService();
+    const userService = new UserService(this.prisma);
     return userService.createUser({
       ...userData,
       organizationId,
@@ -553,7 +558,7 @@ export class OrganizationService {
    * // User is deactivated but data is retained
    */
   async removeUser(organizationId: string, userId: string): Promise<void> {
-    const user = await prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: {
         id: userId,
         organizationId: organizationId,
@@ -570,7 +575,7 @@ export class OrganizationService {
     }
 
     // Soft delete the user
-    const userService = new UserService();
+    const userService = new UserService(this.prisma);
     await userService.deleteUser(userId);
   }
 }

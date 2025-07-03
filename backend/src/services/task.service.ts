@@ -4,6 +4,8 @@ import type {
   TaskComment,
   TaskAttachment,
   TaskPriority,
+  TaskCategory,
+  PrismaClient,
 } from '@prisma/client';
 import { Prisma, TaskStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
@@ -43,6 +45,7 @@ export interface CreateTaskData {
   dueDate: Date;
   status?: TaskStatus;
   priority?: TaskPriority;
+  category?: TaskCategory;
   estimatedCost?: number;
   estimatedMinutes?: number;
   assetId?: string;
@@ -174,10 +177,12 @@ export interface TaskStatistics {
  * @class TaskService
  */
 export class TaskService {
+  private prisma: PrismaClient;
   private activityStreamService: ActivityStreamService;
 
-  constructor() {
-    this.activityStreamService = new ActivityStreamService(prisma);
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+    this.activityStreamService = new ActivityStreamService(prismaClient);
   }
   /**
    * Validate task status transitions according to business rules.
@@ -230,6 +235,7 @@ export class TaskService {
       dueDate,
       status = 'PLANNED',
       priority = 'MEDIUM',
+      category,
       estimatedCost,
       estimatedMinutes,
       assetId,
@@ -238,7 +244,7 @@ export class TaskService {
     } = data;
 
     // Validate organization exists
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id: organizationId },
     });
 
@@ -248,7 +254,7 @@ export class TaskService {
 
     // Validate asset if provided
     if (assetId) {
-      const asset = await prisma.asset.findFirst({
+      const asset = await this.prisma.asset.findFirst({
         where: { id: assetId, organizationId },
       });
       if (!asset) {
@@ -258,7 +264,7 @@ export class TaskService {
 
     // Validate schedule if provided
     if (scheduleId) {
-      const schedule = await prisma.schedule.findFirst({
+      const schedule = await this.prisma.schedule.findFirst({
         where: { id: scheduleId, organizationId },
       });
       if (!schedule) {
@@ -268,7 +274,7 @@ export class TaskService {
 
     // Validate assigned users if provided
     if (assignUserIds.length > 0) {
-      const users = await prisma.user.findMany({
+      const users = await this.prisma.user.findMany({
         where: {
           id: { in: assignUserIds },
           organizationId,
@@ -281,7 +287,7 @@ export class TaskService {
     }
 
     // Create task in transaction
-    const task = await prisma.$transaction(async (tx) => {
+    const task = await this.prisma.$transaction(async (tx) => {
       // Create the task
       const newTask = await tx.task.create({
         data: {
@@ -291,6 +297,8 @@ export class TaskService {
           dueDate,
           status,
           priority,
+          // Set category: explicit category takes precedence, then infer from context
+          category: category || (scheduleId ? 'MAINTENANCE' : undefined),
           estimatedCost: estimatedCost ? new Prisma.Decimal(estimatedCost) : undefined,
           estimatedMinutes,
           assetId,
@@ -448,7 +456,7 @@ export class TaskService {
       includeAttachments = false,
     } = options;
 
-    const task = await prisma.task.findFirst({
+    const task = await this.prisma.task.findFirst({
       where: { id, organizationId },
       include: {
         asset: {
@@ -545,7 +553,7 @@ export class TaskService {
 
     // Validate asset if changing
     if (assetId !== undefined && assetId !== null) {
-      const asset = await prisma.asset.findFirst({
+      const asset = await this.prisma.asset.findFirst({
         where: { id: assetId, organizationId },
       });
       if (!asset) {
@@ -596,7 +604,7 @@ export class TaskService {
       }
     }
 
-    const updatedTask = await prisma.task.update({
+    const updatedTask = await this.prisma.task.update({
       where: { id },
       data: updateData,
       include: {
@@ -718,7 +726,7 @@ export class TaskService {
 
     // Check if task is part of an active schedule
     if (task.scheduleId) {
-      const schedule = await prisma.schedule.findFirst({
+      const schedule = await this.prisma.schedule.findFirst({
         where: { id: task.scheduleId, isActive: true },
       });
       if (schedule) {
@@ -728,7 +736,7 @@ export class TaskService {
       }
     }
 
-    await prisma.task.delete({ where: { id } });
+    await this.prisma.task.delete({ where: { id } });
 
     logger.info('Task deleted', {
       taskId: id,
@@ -833,8 +841,8 @@ export class TaskService {
     const where: Prisma.TaskWhereInput = { AND: whereConditions };
 
     // Execute query
-    const [tasks, total] = await prisma.$transaction([
-      prisma.task.findMany({
+    const [tasks, total] = await this.prisma.$transaction([
+      this.prisma.task.findMany({
         where,
         skip,
         take: limit,
@@ -876,7 +884,7 @@ export class TaskService {
           },
         },
       }),
-      prisma.task.count({ where }),
+      this.prisma.task.count({ where }),
     ]);
 
     return {
@@ -927,7 +935,7 @@ export class TaskService {
     }
 
     // Validate users exist and belong to organization
-    const users = await prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: {
         id: { in: userIds },
         organizationId,
@@ -940,7 +948,7 @@ export class TaskService {
     }
 
     // Remove existing assignments and add new ones
-    await prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       await tx.taskAssignment.deleteMany({
         where: { taskId },
       });
@@ -985,24 +993,24 @@ export class TaskService {
   async getTaskStatistics(organizationId: string): Promise<TaskStatistics> {
     const [total, byStatus, byPriority, overdue, dueSoon, completedTasks] = await Promise.all([
       // Total count
-      prisma.task.count({ where: { organizationId } }),
+      this.prisma.task.count({ where: { organizationId } }),
 
       // Count by status
-      prisma.task.groupBy({
+      this.prisma.task.groupBy({
         by: ['status'],
         where: { organizationId },
         _count: true,
       }),
 
       // Count by priority
-      prisma.task.groupBy({
+      this.prisma.task.groupBy({
         by: ['priority'],
         where: { organizationId },
         _count: true,
       }),
 
       // Overdue tasks
-      prisma.task.count({
+      this.prisma.task.count({
         where: {
           organizationId,
           dueDate: { lt: new Date() },
@@ -1011,7 +1019,7 @@ export class TaskService {
       }),
 
       // Due soon (within 7 days)
-      prisma.task.count({
+      this.prisma.task.count({
         where: {
           organizationId,
           dueDate: {
@@ -1023,7 +1031,7 @@ export class TaskService {
       }),
 
       // Completed tasks for completion rate calculation
-      prisma.task.findMany({
+      this.prisma.task.findMany({
         where: {
           organizationId,
           status: TaskStatus.DONE,
@@ -1079,7 +1087,7 @@ export class TaskService {
    * });
    */
   async getOverdueTasks(organizationId: string): Promise<TaskWithRelations[]> {
-    const tasks = await prisma.task.findMany({
+    const tasks = await this.prisma.task.findMany({
       where: {
         organizationId,
         dueDate: { lt: new Date() },
@@ -1239,7 +1247,7 @@ export class TaskService {
    */
   async getTaskTree(rootTaskId: string): Promise<TaskTreeItem[]> {
     try {
-      const result = await prisma.$queryRaw<TaskTreeItem[]>(Prisma.sql`
+      const result = await this.prisma.$queryRaw<TaskTreeItem[]>(Prisma.sql`
         WITH RECURSIVE task_tree AS (
           SELECT 
             id, 
@@ -1303,7 +1311,7 @@ export class TaskService {
     data: Omit<CreateTaskData, 'parentTaskId'>,
   ): Promise<TaskWithRelations> {
     // Verify parent task exists and belongs to the same organization
-    const parentTask = await prisma.task.findUnique({
+    const parentTask = await this.prisma.task.findUnique({
       where: { id: parentTaskId },
     });
 
@@ -1393,7 +1401,7 @@ export class TaskService {
     organizationId: string,
     data: UpdateTaskData,
   ): Promise<TaskWithRelations> {
-    return await prisma.$transaction(async (tx) => {
+    return await this.prisma.$transaction(async (tx) => {
       // First, update the task
       const updatedTask = await tx.task.update({
         where: {
@@ -1480,7 +1488,7 @@ export class TaskService {
     organizationId: string,
   ): Promise<void> {
     // Verify parent task exists
-    const parentTask = await prisma.task.findFirst({
+    const parentTask = await this.prisma.task.findFirst({
       where: { id: parentTaskId, organizationId },
     });
 
@@ -1489,7 +1497,7 @@ export class TaskService {
     }
 
     // Update all subtask orders in a transaction
-    await prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       for (const { taskId, order } of subtaskOrders) {
         await tx.task.update({
           where: {
@@ -1550,7 +1558,7 @@ export class TaskService {
     }
   > {
     // Verify task exists and get organization context
-    const task = await prisma.task.findUnique({
+    const task = await this.prisma.task.findUnique({
       where: { id: data.taskId },
       include: {
         organization: {
@@ -1564,7 +1572,7 @@ export class TaskService {
     }
 
     // Verify user exists and belongs to organization
-    const user = await prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: {
         id: data.userId,
         organizationId: task.organizationId,
@@ -1577,7 +1585,7 @@ export class TaskService {
     }
 
     // Create comment and process mentions
-    const comment = await prisma.$transaction(async (tx) => {
+    const comment = await this.prisma.$transaction(async (tx) => {
       // Create the comment
       const comment = await tx.taskComment.create({
         data: {
@@ -1669,7 +1677,7 @@ export class TaskService {
     const skip = (page - 1) * limit;
 
     // Verify task exists and belongs to organization
-    const task = await prisma.task.findFirst({
+    const task = await this.prisma.task.findFirst({
       where: { id: taskId, organizationId },
     });
 
@@ -1677,8 +1685,8 @@ export class TaskService {
       throw new NotFoundError('Task not found');
     }
 
-    const [comments, total] = await prisma.$transaction([
-      prisma.taskComment.findMany({
+    const [comments, total] = await this.prisma.$transaction([
+      this.prisma.taskComment.findMany({
         where: { taskId },
         skip,
         take: limit,
@@ -1693,7 +1701,7 @@ export class TaskService {
           },
         },
       }),
-      prisma.taskComment.count({ where: { taskId } }),
+      this.prisma.taskComment.count({ where: { taskId } }),
     ]);
 
     return {
@@ -1730,7 +1738,7 @@ export class TaskService {
     }
   > {
     // Find comment and verify permissions
-    const comment = await prisma.taskComment.findFirst({
+    const comment = await this.prisma.taskComment.findFirst({
       where: { id: commentId },
       include: {
         task: {
@@ -1758,7 +1766,7 @@ export class TaskService {
       throw new ValidationError('You can only edit your own comments');
     }
 
-    const updatedComment = await prisma.$transaction(async (tx) => {
+    const updatedComment = await this.prisma.$transaction(async (tx) => {
       // Update the comment
       const updatedComment = await tx.taskComment.update({
         where: { id: commentId },
@@ -1817,7 +1825,7 @@ export class TaskService {
     organizationId: string,
   ): Promise<void> {
     // Find comment and verify permissions
-    const comment = await prisma.taskComment.findFirst({
+    const comment = await this.prisma.taskComment.findFirst({
       where: { id: commentId },
       include: {
         task: {
@@ -1838,7 +1846,7 @@ export class TaskService {
       throw new ValidationError('You can only delete your own comments');
     }
 
-    await prisma.taskComment.delete({
+    await this.prisma.taskComment.delete({
       where: { id: commentId },
     });
 

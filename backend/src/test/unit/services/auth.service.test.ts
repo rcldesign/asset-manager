@@ -2,23 +2,29 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import jwt from 'jsonwebtoken';
 import * as speakeasy from 'speakeasy';
 import qrcode from 'qrcode';
-import { AuthService } from '../../../services/auth.service';
-import { UserService } from '../../../services/user.service';
-import { prisma } from '../../../lib/prisma';
 import { AppError, AuthenticationError, ValidationError } from '../../../utils/errors';
 import * as crypto from '../../../utils/crypto';
 import type { User } from '@prisma/client';
 import { UserRole } from '@prisma/client';
 
-// Mock dependencies
+// Enable automatic mocking for Prisma
 jest.mock('../../../lib/prisma');
+
+// Mock dependencies
 jest.mock('../../../services/user.service');
 jest.mock('jsonwebtoken');
 jest.mock('speakeasy');
 jest.mock('qrcode');
 jest.mock('../../../utils/crypto');
 
+// Import modules after mocking
+import { AuthService } from '../../../services/auth.service';
+import { UserService } from '../../../services/user.service';
+import { prisma } from '../../../lib/prisma';
+
+// Type the mocked modules
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+
 const mockUserService = UserService as jest.MockedClass<typeof UserService>;
 const mockJwt = jwt as jest.Mocked<typeof jwt>;
 const mockSpeakeasy = speakeasy as jest.Mocked<typeof speakeasy>;
@@ -69,7 +75,7 @@ describe('AuthService', () => {
     } as any;
 
     mockUserService.mockImplementation(() => userServiceInstance);
-    authService = new AuthService();
+    authService = new AuthService(mockPrisma);
   });
 
   describe('authenticate', () => {

@@ -3,12 +3,12 @@ import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 import { addWebhookJob } from '../lib/queue';
-import type { Prisma, Organization, User } from '@prisma/client';
-import type { 
-  WebhookEventPayloadMap, 
+import type { Prisma, PrismaClient } from '@prisma/client';
+import type {
+  WebhookEventPayloadMap,
   EnhancedWebhookEvent,
   WebhookUser,
-  WebhookOrganization 
+  WebhookOrganization,
 } from '../types/webhook-payloads';
 
 export interface WebhookEvent {
@@ -86,14 +86,22 @@ export interface WebhookDelivery {
 
 export class WebhookService {
   private static instance: WebhookService;
+  private prisma: PrismaClient;
 
-  private constructor() {}
+  private constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+  }
 
-  public static getInstance(): WebhookService {
+  public static getInstance(prismaClient?: PrismaClient): WebhookService {
     if (!WebhookService.instance) {
-      WebhookService.instance = new WebhookService();
+      WebhookService.instance = new WebhookService(prismaClient);
     }
     return WebhookService.instance;
+  }
+
+  // Method to reset instance for testing
+  public static resetInstance(): void {
+    WebhookService.instance = undefined as any;
   }
 
   /**
@@ -110,7 +118,7 @@ export class WebhookService {
       retryPolicy?: WebhookConfig['retryPolicy'];
     },
   ): Promise<WebhookConfig> {
-    const webhook = await prisma.webhookSubscription.create({
+    const webhook = await this.prisma.webhookSubscription.create({
       data: {
         organizationId,
         name,
@@ -152,7 +160,7 @@ export class WebhookService {
       retryPolicy: WebhookConfig['retryPolicy'];
     }>,
   ): Promise<WebhookConfig | null> {
-    const webhook = await prisma.webhookSubscription.updateMany({
+    const webhook = await this.prisma.webhookSubscription.updateMany({
       where: {
         id: webhookId,
         organizationId,
@@ -164,7 +172,7 @@ export class WebhookService {
       return null;
     }
 
-    const updated = await prisma.webhookSubscription.findUnique({
+    const updated = await this.prisma.webhookSubscription.findUnique({
       where: { id: webhookId },
     });
 
@@ -180,7 +188,7 @@ export class WebhookService {
    * Delete webhook configuration
    */
   public async deleteWebhook(webhookId: string, organizationId: string): Promise<boolean> {
-    const result = await prisma.webhookSubscription.deleteMany({
+    const result = await this.prisma.webhookSubscription.deleteMany({
       where: {
         id: webhookId,
         organizationId,
@@ -219,7 +227,7 @@ export class WebhookService {
       };
     }
 
-    const webhooks = await prisma.webhookSubscription.findMany({
+    const webhooks = await this.prisma.webhookSubscription.findMany({
       where,
       orderBy: { createdAt: 'desc' },
     });
@@ -234,7 +242,7 @@ export class WebhookService {
     webhookId: string,
     organizationId: string,
   ): Promise<WebhookConfig | null> {
-    const webhook = await prisma.webhookSubscription.findFirst({
+    const webhook = await this.prisma.webhookSubscription.findFirst({
       where: {
         id: webhookId,
         organizationId,
@@ -251,18 +259,18 @@ export class WebhookService {
     type: T,
     organizationId: string,
     userId: string,
-    payload: WebhookEventPayloadMap[T]
+    payload: WebhookEventPayloadMap[T],
   ): Promise<EnhancedWebhookEvent<WebhookEventPayloadMap[T]>> {
     // Fetch organization and user details
     const [organization, user] = await Promise.all([
-      prisma.organization.findUnique({
+      this.prisma.organization.findUnique({
         where: { id: organizationId },
-        select: { id: true, name: true }
+        select: { id: true, name: true },
       }),
-      prisma.user.findUnique({
+      this.prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true, email: true, name: true, role: true }
-      })
+        select: { id: true, email: true, fullName: true, role: true },
+      }),
     ]);
 
     if (!organization || !user) {
@@ -272,13 +280,13 @@ export class WebhookService {
     const webhookUser: WebhookUser = {
       id: user.id,
       email: user.email,
-      name: user.name,
-      role: user.role
+      name: user.fullName || user.email,
+      role: user.role,
     };
 
     const webhookOrg: WebhookOrganization = {
       id: organization.id,
-      name: organization.name
+      name: organization.name,
     };
 
     return {
@@ -291,8 +299,8 @@ export class WebhookService {
       data: payload,
       metadata: {
         version: '2.0', // Indicates enhanced payload format
-        source: 'asset-manager-backend'
-      }
+        source: 'asset-manager-backend',
+      },
     };
   }
 
@@ -345,7 +353,7 @@ export class WebhookService {
    * Deliver a webhook (called by the webhook worker)
    */
   public async deliverWebhook(webhookId: string, event: WebhookEvent): Promise<WebhookDelivery> {
-    const webhook = await prisma.webhookSubscription.findUnique({
+    const webhook = await this.prisma.webhookSubscription.findUnique({
       where: { id: webhookId },
     });
 
@@ -354,7 +362,7 @@ export class WebhookService {
     }
 
     // Create delivery record
-    const delivery = await prisma.webhookDelivery.create({
+    const delivery = await this.prisma.webhookDelivery.create({
       data: {
         webhookId,
         eventId: event.id,
@@ -368,24 +376,26 @@ export class WebhookService {
     try {
       // Prepare payload - check if it's an enhanced event
       const isEnhancedEvent = 'organization' in event && 'triggeredBy' in event;
-      
-      const payload = isEnhancedEvent ? {
-        id: event.id,
-        type: event.type,
-        timestamp: event.timestamp.toISOString(),
-        organization: (event as EnhancedWebhookEvent).organization,
-        triggeredBy: (event as EnhancedWebhookEvent).triggeredBy,
-        data: event.data,
-        metadata: event.metadata || {},
-      } : {
-        id: event.id,
-        type: event.type,
-        timestamp: event.timestamp.toISOString(),
-        data: event.data,
-        metadata: event.metadata || {},
-        // For backward compatibility, add organizationId if not enhanced
-        organizationId: event.organizationId
-      };
+
+      const payload = isEnhancedEvent
+        ? {
+            id: event.id,
+            type: event.type,
+            timestamp: event.timestamp.toISOString(),
+            organization: (event as EnhancedWebhookEvent).organization,
+            triggeredBy: (event as EnhancedWebhookEvent).triggeredBy,
+            data: event.data,
+            metadata: event.metadata || {},
+          }
+        : {
+            id: event.id,
+            type: event.type,
+            timestamp: event.timestamp.toISOString(),
+            data: event.data,
+            metadata: event.metadata || {},
+            // For backward compatibility, add organizationId if not enhanced
+            organizationId: event.organizationId,
+          };
 
       // Prepare headers
       const headers: Record<string, string> = {
@@ -411,7 +421,7 @@ export class WebhookService {
       });
 
       // Update delivery record
-      await prisma.webhookDelivery.update({
+      await this.prisma.webhookDelivery.update({
         where: { id: delivery.id },
         data: {
           status: response.status >= 200 && response.status < 300 ? 'success' : 'failed',
@@ -440,7 +450,7 @@ export class WebhookService {
       // Update delivery record with error
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-      await prisma.webhookDelivery.update({
+      await this.prisma.webhookDelivery.update({
         where: { id: delivery.id },
         data: {
           status: 'failed',
@@ -521,13 +531,13 @@ export class WebhookService {
     }
 
     const [deliveries, total] = await Promise.all([
-      prisma.webhookDelivery.findMany({
+      this.prisma.webhookDelivery.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         take: options?.limit || 50,
         skip: options?.offset || 0,
       }),
-      prisma.webhookDelivery.count({ where }),
+      this.prisma.webhookDelivery.count({ where }),
     ]);
 
     return {

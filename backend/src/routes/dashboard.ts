@@ -3,15 +3,9 @@ import { z } from 'zod';
 import { authenticateJWT, requirePermission, type AuthenticatedRequest } from '../middleware/auth';
 import { validateRequest } from '../middleware/validation';
 import { prisma } from '../lib/prisma';
-import { logger } from '../utils/logger';
-import { AssetService } from '../services/asset.service';
-import { TaskService } from '../services/task.service';
-import { NotFoundError } from '../utils/errors';
-import type { AssetStatus, TaskStatus } from '@prisma/client';
+import type { TaskStatus } from '@prisma/client';
 
 const router = Router();
-const assetService = new AssetService();
-const taskService = new TaskService();
 
 // All dashboard routes require authentication
 router.use(authenticateJWT);
@@ -31,9 +25,9 @@ const kpiPeriodSchema = z.object({
   period: z.enum(['week', 'month', 'quarter', 'year']).optional().default('month'),
   compare: z
     .string()
-    .transform((v) => v === 'true')
     .optional()
-    .default(false),
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 const chartTypeSchema = z.object({
@@ -114,10 +108,11 @@ router.get(
   '/overview',
   requirePermission('read', 'dashboard', { scope: 'any' }),
   validateRequest({ query: dashboardQuerySchema }),
-  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  async (req, res: Response, next: NextFunction) => {
+    const authenticatedReq = req as AuthenticatedRequest;
     try {
-      const { user } = req;
-      const { startDate, endDate, locationId, includeSublocations } = req.query as z.infer<
+      const { user } = authenticatedReq;
+      const { startDate, endDate, locationId, includeSublocations } = authenticatedReq.query as unknown as z.infer<
         typeof dashboardQuerySchema
       >;
 
@@ -127,7 +122,7 @@ router.get(
       };
 
       // Get location IDs to filter by
-      let locationIds: string[] = [];
+      const locationIds: string[] = [];
       if (locationId) {
         locationIds.push(locationId);
         if (includeSublocations) {
@@ -197,72 +192,78 @@ router.get(
       ]);
 
       // Get task metrics
-      const [totalTasks, tasksByStatus, tasksByPriority, overdueTasks, dueTodayTasks, upcomingTasks] =
-        await Promise.all([
-          prisma.task.count({
-            where: {
-              organizationId: user.organizationId,
-              ...(locationFilter && { asset: { locationId: locationFilter } }),
-              ...(dateFilters && { createdAt: dateFilters }),
+      const [
+        totalTasks,
+        tasksByStatus,
+        tasksByPriority,
+        overdueTasks,
+        dueTodayTasks,
+        upcomingTasks,
+      ] = await Promise.all([
+        prisma.task.count({
+          where: {
+            organizationId: user.organizationId,
+            ...(locationFilter && { asset: { locationId: locationFilter } }),
+            ...(dateFilters && { createdAt: dateFilters }),
+          },
+        }),
+        prisma.task.groupBy({
+          by: ['status'],
+          where: {
+            organizationId: user.organizationId,
+            ...(locationFilter && { asset: { locationId: locationFilter } }),
+            ...(dateFilters && { createdAt: dateFilters }),
+          },
+          _count: true,
+        }),
+        prisma.task.groupBy({
+          by: ['priority'],
+          where: {
+            organizationId: user.organizationId,
+            ...(locationFilter && { asset: { locationId: locationFilter } }),
+            ...(dateFilters && { createdAt: dateFilters }),
+          },
+          _count: true,
+        }),
+        prisma.task.count({
+          where: {
+            organizationId: user.organizationId,
+            ...(locationFilter && { asset: { locationId: locationFilter } }),
+            dueDate: {
+              lt: new Date(),
             },
-          }),
-          prisma.task.groupBy({
-            by: ['status'],
-            where: {
-              organizationId: user.organizationId,
-              ...(locationFilter && { asset: { locationId: locationFilter } }),
-              ...(dateFilters && { createdAt: dateFilters }),
+            status: {
+              not: 'DONE',
             },
-            _count: true,
-          }),
-          prisma.task.groupBy({
-            by: ['priority'],
-            where: {
-              organizationId: user.organizationId,
-              ...(locationFilter && { asset: { locationId: locationFilter } }),
-              ...(dateFilters && { createdAt: dateFilters }),
+          },
+        }),
+        prisma.task.count({
+          where: {
+            organizationId: user.organizationId,
+            ...(locationFilter && { asset: { locationId: locationFilter } }),
+            dueDate: {
+              gte: new Date(new Date().setHours(0, 0, 0, 0)),
+              lt: new Date(new Date().setHours(23, 59, 59, 999)),
             },
-            _count: true,
-          }),
-          prisma.task.count({
-            where: {
-              organizationId: user.organizationId,
-              ...(locationFilter && { asset: { locationId: locationFilter } }),
-              dueDate: {
-                lt: new Date(),
-              },
-              status: {
-                not: 'DONE',
-              },
+            status: {
+              not: 'DONE',
             },
-          }),
-          prisma.task.count({
-            where: {
-              organizationId: user.organizationId,
-              ...(locationFilter && { asset: { locationId: locationFilter } }),
-              dueDate: {
-                gte: new Date(new Date().setHours(0, 0, 0, 0)),
-                lt: new Date(new Date().setHours(23, 59, 59, 999)),
-              },
-              status: {
-                not: 'DONE',
-              },
+          },
+        }),
+        prisma.task.count({
+          where: {
+            organizationId: user.organizationId,
+            ...(locationFilter && { asset: { locationId: locationFilter } }),
+            dueDate: {
+              gte: new Date(),
+              lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Next 7 days
             },
-          }),
-          prisma.task.count({
-            where: {
-              organizationId: user.organizationId,
-              ...(locationFilter && { asset: { locationId: locationFilter } }),
-              dueDate: {
-                gte: new Date(),
-                lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Next 7 days
-              },
-              status: {
-                not: 'DONE',
-              },
+            status: {
+              not: 'DONE',
             },
-          }),
-        ]);
+          },
+        }),
+      ]);
 
       // Get user metrics
       const [totalUsers, activeUsers, usersByRole] = await Promise.all([
@@ -312,11 +313,14 @@ router.get(
 
       // Transform grouped data
       const transformGroupedData = (data: any[]) =>
-        data.reduce((acc, item) => {
-          const key = Object.values(item).find((v) => typeof v === 'string') as string;
-          acc[key] = item._count;
-          return acc;
-        }, {} as Record<string, number>);
+        data.reduce(
+          (acc, item) => {
+            const key = Object.values(item).find((v) => typeof v === 'string') as string;
+            acc[key] = item._count;
+            return acc;
+          },
+          {} as Record<string, number>,
+        );
 
       res.json({
         assets: {
@@ -414,10 +418,11 @@ router.get(
   '/kpis',
   requirePermission('read', 'dashboard', { scope: 'any' }),
   validateRequest({ query: kpiPeriodSchema }),
-  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  async (req, res: Response, next: NextFunction) => {
+    const authenticatedReq = req as AuthenticatedRequest;
     try {
-      const { user } = req;
-      const { period, compare } = req.query as z.infer<typeof kpiPeriodSchema>;
+      const { user } = authenticatedReq;
+      const { period, compare } = authenticatedReq.query as unknown as z.infer<typeof kpiPeriodSchema>;
 
       // Calculate date ranges
       const now = new Date();
@@ -566,14 +571,17 @@ router.get(
   '/charts/tasks',
   requirePermission('read', 'dashboard', { scope: 'any' }),
   validateRequest({ query: dashboardQuerySchema.merge(chartTypeSchema) }),
-  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  async (req, res: Response, next: NextFunction) => {
+    const authenticatedReq = req as AuthenticatedRequest;
     try {
-      const { user } = req;
-      const { startDate, endDate, type, groupBy } = req.query as z.infer<
+      const { user } = authenticatedReq;
+      const { startDate, endDate, groupBy } = authenticatedReq.query as unknown as z.infer<
         typeof dashboardQuerySchema & typeof chartTypeSchema
       >;
 
-      const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const start = startDate
+        ? new Date(startDate)
+        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       const end = endDate ? new Date(endDate) : new Date();
 
       // Get tasks grouped by status and period
@@ -612,7 +620,7 @@ router.get(
         const periodTasks = groupedData[label];
         Object.keys(statusData).forEach((status) => {
           statusData[status as TaskStatus].push(
-            periodTasks.filter((t) => t.status === status).length,
+            periodTasks?.filter((t) => t.status === status).length || 0,
           );
         });
       });
@@ -711,10 +719,11 @@ router.get(
       groupBy: z.enum(['category', 'status', 'location']).optional().default('category'),
     }),
   }),
-  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  async (req, res: Response, next: NextFunction) => {
+    const authenticatedReq = req as AuthenticatedRequest;
     try {
-      const { user } = req;
-      const { type, groupBy } = req.query as { type: string; groupBy: string };
+      const { user } = authenticatedReq;
+      const { groupBy } = authenticatedReq.query as { type: string; groupBy: string };
 
       let groupedData: any[];
       let labels: string[];
@@ -723,7 +732,7 @@ router.get(
 
       switch (groupBy) {
         case 'category':
-          groupedData = await prisma.asset.groupBy({
+          groupedData = await (prisma.asset.groupBy as any)({
             by: ['category'],
             where: {
               organizationId: user.organizationId,
@@ -744,7 +753,7 @@ router.get(
           break;
 
         case 'status':
-          groupedData = await prisma.asset.groupBy({
+          groupedData = await (prisma.asset.groupBy as any)({
             by: ['status'],
             where: {
               organizationId: user.organizationId,
@@ -769,9 +778,7 @@ router.get(
           });
           labels = locations.map((l) => l.name);
           data = locations.map((l) => l._count.assets);
-          backgroundColor = labels.map(
-            (_, i) => `hsl(${(i * 360) / labels.length}, 70%, 60%)`,
-          );
+          backgroundColor = labels.map((_, i) => `hsl(${(i * 360) / labels.length}, 70%, 60%)`);
           break;
 
         default:
@@ -873,32 +880,41 @@ async function calculateKPIs(
   const assetUtilization = totalAssets > 0 ? (operationalAssets / totalAssets) * 100 : 0;
 
   // Maintenance compliance (percentage of maintenance tasks completed on time)
-  const [maintenanceTasks, completedMaintenanceTasks] = await Promise.all([
+  const [maintenanceTasks, allCompletedMaintenanceTasks] = await Promise.all([
     prisma.task.count({
       where: {
         organizationId,
-        isMaintenanceTask: true,
+        category: 'MAINTENANCE',
         dueDate: {
           gte: startDate,
           lte: endDate,
         },
       },
     }),
-    prisma.task.count({
+    prisma.task.findMany({
       where: {
         organizationId,
-        isMaintenanceTask: true,
+        category: 'MAINTENANCE',
         status: 'DONE',
         dueDate: {
           gte: startDate,
           lte: endDate,
         },
         completedAt: {
-          lte: prisma.$queryRawUnsafe('due_date'),
+          not: null,
         },
+      },
+      select: {
+        completedAt: true,
+        dueDate: true,
       },
     }),
   ]);
+
+  // Count tasks completed on time (completed before or on due date)
+  const completedMaintenanceTasks = allCompletedMaintenanceTasks.filter(
+    (task) => task.completedAt && task.completedAt <= task.dueDate,
+  ).length;
 
   const maintenanceCompliance =
     maintenanceTasks > 0 ? (completedMaintenanceTasks / maintenanceTasks) * 100 : 0;
@@ -924,7 +940,7 @@ function groupTasksByPeriod(
   while (current <= endDate) {
     const key = formatDateByPeriod(current, groupBy);
     grouped[key] = [];
-    
+
     // Increment date based on groupBy
     switch (groupBy) {
       case 'day':
@@ -953,7 +969,7 @@ function groupTasksByPeriod(
 function formatDateByPeriod(date: Date, period: 'day' | 'week' | 'month'): string {
   switch (period) {
     case 'day':
-      return date.toISOString().split('T')[0];
+      return date.toISOString().split('T')[0]!;
     case 'week':
       const weekStart = new Date(date);
       weekStart.setDate(date.getDate() - date.getDay());

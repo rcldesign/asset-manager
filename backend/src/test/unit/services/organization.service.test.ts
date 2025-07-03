@@ -1,7 +1,15 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { UserRole } from '@prisma/client';
-import { prismaMock } from '../../prisma-singleton';
+
+// Enable automatic mocking for Prisma
+jest.mock('../../../lib/prisma');
+
+// Import modules after mocking
 import { OrganizationService } from '../../../services/organization.service';
+import { prisma } from '../../../lib/prisma';
+
+// Type the mocked module
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 
 // Helper function to create a mock user with all required fields
 const createMockUser = (overrides: Partial<any> = {}) => ({
@@ -9,6 +17,10 @@ const createMockUser = (overrides: Partial<any> = {}) => ({
   email: 'test@example.com',
   passwordHash: 'hashed-password',
   fullName: 'Test User',
+  firstName: 'Test',
+  lastName: 'User',
+  avatarUrl: null,
+  lastActiveAt: null,
   role: UserRole.MEMBER,
   organizationId: 'org-123',
   emailVerified: true,
@@ -25,7 +37,8 @@ describe('OrganizationService', () => {
   let organizationService: OrganizationService;
 
   beforeEach(() => {
-    organizationService = new OrganizationService();
+    jest.clearAllMocks();
+    organizationService = new OrganizationService(mockPrisma);
   });
 
   describe('createOrganization', () => {
@@ -42,12 +55,12 @@ describe('OrganizationService', () => {
         updatedAt: new Date(),
       };
 
-      prismaMock.organization.create.mockResolvedValue(createdOrganization);
+      mockPrisma.organization.create.mockResolvedValue(createdOrganization);
 
       const result = await organizationService.createOrganization(organizationData);
 
       expect(result).toEqual(createdOrganization);
-      expect(prismaMock.organization.create).toHaveBeenCalledWith({
+      expect(mockPrisma.organization.create).toHaveBeenCalledWith({
         data: { name: organizationData.name },
       });
     });
@@ -76,12 +89,12 @@ describe('OrganizationService', () => {
         },
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue(organization);
+      mockPrisma.organization.findUnique.mockResolvedValue(organization);
 
       const result = await organizationService.getOrganizationById(organizationId);
 
       expect(result).toEqual(organization);
-      expect(prismaMock.organization.findUnique).toHaveBeenCalledWith({
+      expect(mockPrisma.organization.findUnique).toHaveBeenCalledWith({
         where: { id: organizationId },
         include: {
           owner: true,
@@ -98,7 +111,7 @@ describe('OrganizationService', () => {
 
     test('should return null if organization not found', async () => {
       const organizationId = 'non-existent';
-      prismaMock.organization.findUnique.mockResolvedValue(null);
+      mockPrisma.organization.findUnique.mockResolvedValue(null);
 
       const result = await organizationService.getOrganizationById(organizationId);
 
@@ -136,13 +149,13 @@ describe('OrganizationService', () => {
         },
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue(existingOrganization);
-      prismaMock.organization.update.mockResolvedValue(updatedOrganization);
+      mockPrisma.organization.findUnique.mockResolvedValue(existingOrganization);
+      mockPrisma.organization.update.mockResolvedValue(updatedOrganization);
 
       const result = await organizationService.updateOrganization(organizationId, updateData);
 
       expect(result).toEqual(updatedOrganization);
-      expect(prismaMock.organization.update).toHaveBeenCalledWith({
+      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
         where: { id: organizationId },
         data: updateData,
         include: {
@@ -162,7 +175,7 @@ describe('OrganizationService', () => {
       const organizationId = 'non-existent';
       const updateData = { name: 'Updated Organization' };
 
-      prismaMock.organization.findUnique.mockResolvedValue(null);
+      mockPrisma.organization.findUnique.mockResolvedValue(null);
 
       await expect(
         organizationService.updateOrganization(organizationId, updateData),
@@ -189,24 +202,24 @@ describe('OrganizationService', () => {
         organizationId,
       });
 
-      prismaMock.organization.findUnique.mockResolvedValue(organization);
-      prismaMock.user.findFirst.mockResolvedValue(user);
-      prismaMock.organization.update.mockResolvedValue({
+      mockPrisma.organization.findUnique.mockResolvedValue(organization);
+      mockPrisma.user.findFirst.mockResolvedValue(user);
+      mockPrisma.organization.update.mockResolvedValue({
         ...organization,
         ownerUserId: userId,
       });
-      prismaMock.user.update.mockResolvedValue({
+      mockPrisma.user.update.mockResolvedValue({
         ...user,
         role: UserRole.OWNER,
       });
 
       await organizationService.setOwner(organizationId, userId);
 
-      expect(prismaMock.organization.update).toHaveBeenCalledWith({
+      expect(mockPrisma.organization.update).toHaveBeenCalledWith({
         where: { id: organizationId },
         data: { ownerUserId: userId },
       });
-      expect(prismaMock.user.update).toHaveBeenCalledWith({
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
         where: { id: userId },
         data: { role: UserRole.OWNER },
       });
@@ -216,7 +229,7 @@ describe('OrganizationService', () => {
       const organizationId = 'non-existent';
       const userId = 'user-123';
 
-      prismaMock.organization.findUnique.mockResolvedValue(null);
+      mockPrisma.organization.findUnique.mockResolvedValue(null);
 
       await expect(organizationService.setOwner(organizationId, userId)).rejects.toThrow(
         'Organization not found',
@@ -235,8 +248,8 @@ describe('OrganizationService', () => {
         updatedAt: new Date(),
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue(organization);
-      prismaMock.user.findFirst.mockResolvedValue(null);
+      mockPrisma.organization.findUnique.mockResolvedValue(organization);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
 
       await expect(organizationService.setOwner(organizationId, userId)).rejects.toThrow(
         'User not found in organization',
@@ -264,12 +277,12 @@ describe('OrganizationService', () => {
         }),
       ];
 
-      prismaMock.user.findMany.mockResolvedValue(members);
+      mockPrisma.user.findMany.mockResolvedValue(members);
 
       const result = await organizationService.getMembers(organizationId);
 
       expect(result).toEqual(members);
-      expect(prismaMock.user.findMany).toHaveBeenCalledWith({
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
         where: { organizationId },
         orderBy: { createdAt: 'desc' },
       });
@@ -298,14 +311,14 @@ describe('OrganizationService', () => {
         { role: 'MEMBER', _count: 4 },
       ];
 
-      prismaMock.organization.findUnique.mockResolvedValue(organization);
-      prismaMock.user.count
+      mockPrisma.organization.findUnique.mockResolvedValue(organization);
+      mockPrisma.user.count
         .mockResolvedValueOnce(10) // totalUsers
         .mockResolvedValueOnce(8); // activeUsers
-      prismaMock.asset.count.mockResolvedValue(20);
-      prismaMock.task.count.mockResolvedValue(8);
-      (prismaMock.task.groupBy as jest.MockedFunction<any>).mockResolvedValue(tasksByStatus);
-      (prismaMock.user.groupBy as jest.MockedFunction<any>).mockResolvedValue(usersByRole);
+      mockPrisma.asset.count.mockResolvedValue(20);
+      mockPrisma.task.count.mockResolvedValue(8);
+      (mockPrisma.task.groupBy as jest.MockedFunction<any>).mockResolvedValue(tasksByStatus);
+      (mockPrisma.user.groupBy as jest.MockedFunction<any>).mockResolvedValue(usersByRole);
 
       const result = await organizationService.getStatistics(organizationId);
 
@@ -329,7 +342,7 @@ describe('OrganizationService', () => {
     test('should throw error if organization not found', async () => {
       const organizationId = 'non-existent';
 
-      prismaMock.organization.findUnique.mockResolvedValue(null);
+      mockPrisma.organization.findUnique.mockResolvedValue(null);
 
       await expect(organizationService.getStatistics(organizationId)).rejects.toThrow(
         'Organization not found',
@@ -349,12 +362,12 @@ describe('OrganizationService', () => {
         updatedAt: new Date(),
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue(organization);
-      prismaMock.organization.delete.mockResolvedValue(organization);
+      mockPrisma.organization.findUnique.mockResolvedValue(organization);
+      mockPrisma.organization.delete.mockResolvedValue(organization);
 
       await organizationService.deleteOrganization(organizationId);
 
-      expect(prismaMock.organization.delete).toHaveBeenCalledWith({
+      expect(mockPrisma.organization.delete).toHaveBeenCalledWith({
         where: { id: organizationId },
       });
     });
@@ -362,7 +375,7 @@ describe('OrganizationService', () => {
     test('should throw error if organization not found', async () => {
       const organizationId = 'non-existent';
 
-      prismaMock.organization.findUnique.mockResolvedValue(null);
+      mockPrisma.organization.findUnique.mockResolvedValue(null);
 
       await expect(organizationService.deleteOrganization(organizationId)).rejects.toThrow(
         'Organization not found',

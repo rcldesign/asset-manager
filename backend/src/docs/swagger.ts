@@ -99,7 +99,7 @@ const swaggerDefinition = {
           'backup.restored',
           'sync.completed',
           'gdpr.export_requested',
-          'gdpr.deletion_requested'
+          'gdpr.deletion_requested',
         ],
         description: 'Webhook event types that can be subscribed to',
       },
@@ -2076,7 +2076,17 @@ const swaggerDefinition = {
             description: 'Report last update timestamp',
           },
         },
-        required: ['id', 'name', 'type', 'filters', 'columns', 'isPublic', 'createdBy', 'createdAt', 'updatedAt'],
+        required: [
+          'id',
+          'name',
+          'type',
+          'filters',
+          'columns',
+          'isPublic',
+          'createdBy',
+          'createdAt',
+          'updatedAt',
+        ],
       },
       // GDPR schemas
       GDPRDataExport: {

@@ -3,12 +3,30 @@ import { createRedisConnection } from './redis';
 import { logger } from '../utils/logger';
 import type { ActivityEventPayload } from '../types/activity';
 
-// Create shared Redis connection for queues
-const queueConnection = createRedisConnection();
+// Skip queue initialization in test environment
+const isTestEnvironment = process.env.NODE_ENV === 'test';
+
+// Create shared Redis connection for queues (skip in tests)
+const queueConnection = isTestEnvironment ? null : createRedisConnection();
+
+// Mock queue for tests
+const createMockQueue = (_name: string): any => ({
+  add: () => Promise.resolve({ id: '1', data: {} }),
+  close: () => Promise.resolve(),
+  pause: () => Promise.resolve(),
+  resume: () => Promise.resolve(),
+  getWaiting: () => Promise.resolve([]),
+  getActive: () => Promise.resolve([]),
+  getCompleted: () => Promise.resolve([]),
+  getFailed: () => Promise.resolve([]),
+  getDelayed: () => Promise.resolve([]),
+});
 
 // Queue definitions with BullMQ
-export const emailQueue = new Queue('email', {
-  connection: queueConnection,
+export const emailQueue = isTestEnvironment 
+  ? createMockQueue('email')
+  : new Queue('email', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 10,
     removeOnFail: 50,
@@ -20,8 +38,10 @@ export const emailQueue = new Queue('email', {
   },
 });
 
-export const notificationQueue = new Queue('notifications', {
-  connection: queueConnection,
+export const notificationQueue = isTestEnvironment
+  ? createMockQueue('notifications')
+  : new Queue('notifications', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 10,
     removeOnFail: 50,
@@ -33,8 +53,10 @@ export const notificationQueue = new Queue('notifications', {
   },
 });
 
-export const maintenanceQueue = new Queue('maintenance-tasks', {
-  connection: queueConnection,
+export const maintenanceQueue = isTestEnvironment
+  ? createMockQueue('maintenance-tasks')
+  : new Queue('maintenance-tasks', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 5,
     removeOnFail: 25,
@@ -46,8 +68,10 @@ export const maintenanceQueue = new Queue('maintenance-tasks', {
   },
 });
 
-export const reportQueue = new Queue('reports', {
-  connection: queueConnection,
+export const reportQueue = isTestEnvironment
+  ? createMockQueue('reports')
+  : new Queue('reports', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 5,
     removeOnFail: 10,
@@ -59,8 +83,10 @@ export const reportQueue = new Queue('reports', {
   },
 });
 
-export const scheduleQueue = new Queue('schedules', {
-  connection: queueConnection,
+export const scheduleQueue = isTestEnvironment
+  ? createMockQueue('schedules')
+  : new Queue('schedules', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 10,
     removeOnFail: 25,
@@ -72,8 +98,10 @@ export const scheduleQueue = new Queue('schedules', {
   },
 });
 
-export const activityQueue = new Queue('activities', {
-  connection: queueConnection,
+export const activityQueue = isTestEnvironment
+  ? createMockQueue('activities')
+  : new Queue('activities', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 20,
     removeOnFail: 50,
@@ -85,8 +113,10 @@ export const activityQueue = new Queue('activities', {
   },
 });
 
-export const pushNotificationQueue = new Queue('push-notifications', {
-  connection: queueConnection,
+export const pushNotificationQueue = isTestEnvironment
+  ? createMockQueue('push-notifications')
+  : new Queue('push-notifications', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 10,
     removeOnFail: 50,
@@ -98,8 +128,10 @@ export const pushNotificationQueue = new Queue('push-notifications', {
   },
 });
 
-export const webhookQueue = new Queue('webhooks', {
-  connection: queueConnection,
+export const webhookQueue = isTestEnvironment
+  ? createMockQueue('webhooks')
+  : new Queue('webhooks', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 10,
     removeOnFail: 100,
@@ -111,8 +143,10 @@ export const webhookQueue = new Queue('webhooks', {
   },
 });
 
-export const syncQueue = new Queue('sync', {
-  connection: queueConnection,
+export const syncQueue = isTestEnvironment
+  ? createMockQueue('sync')
+  : new Queue('sync', {
+  connection: queueConnection!,
   defaultJobOptions: {
     removeOnComplete: 10,
     removeOnFail: 100,
@@ -124,35 +158,59 @@ export const syncQueue = new Queue('sync', {
   },
 });
 
+// Mock queue events for tests
+const createMockQueueEvents = (_name: string): any => ({
+  on: () => {},
+  close: () => Promise.resolve(),
+});
+
 // Queue Events for monitoring
-export const emailQueueEvents = new QueueEvents('email', {
+export const emailQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('email')
+  : new QueueEvents('email', {
   connection: createRedisConnection(),
 });
-export const notificationQueueEvents = new QueueEvents('notifications', {
+export const notificationQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('notifications')
+  : new QueueEvents('notifications', {
   connection: createRedisConnection(),
 });
-export const maintenanceQueueEvents = new QueueEvents('maintenance-tasks', {
+export const maintenanceQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('maintenance-tasks')
+  : new QueueEvents('maintenance-tasks', {
   connection: createRedisConnection(),
 });
-export const reportQueueEvents = new QueueEvents('reports', {
+export const reportQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('reports')
+  : new QueueEvents('reports', {
   connection: createRedisConnection(),
 });
-export const scheduleQueueEvents = new QueueEvents('schedules', {
+export const scheduleQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('schedules')
+  : new QueueEvents('schedules', {
   connection: createRedisConnection(),
 });
-export const activityQueueEvents = new QueueEvents('activities', {
+export const activityQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('activities')
+  : new QueueEvents('activities', {
   connection: createRedisConnection(),
 });
 
-const pushNotificationQueueEvents = new QueueEvents('push-notifications', {
+const pushNotificationQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('push-notifications')
+  : new QueueEvents('push-notifications', {
   connection: createRedisConnection(),
 });
 
-export const webhookQueueEvents = new QueueEvents('webhooks', {
+export const webhookQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('webhooks')
+  : new QueueEvents('webhooks', {
   connection: createRedisConnection(),
 });
 
-export const syncQueueEvents = new QueueEvents('sync', {
+export const syncQueueEvents = isTestEnvironment
+  ? createMockQueueEvents('sync')
+  : new QueueEvents('sync', {
   connection: createRedisConnection(),
 });
 
@@ -353,7 +411,8 @@ const allQueueEvents = [
   syncQueueEvents,
 ];
 
-allQueueEvents.forEach((queueEvents, index) => {
+if (!isTestEnvironment) {
+  allQueueEvents.forEach((queueEvents, index) => {
   const queueNames = [
     'email',
     'notifications',
@@ -387,7 +446,8 @@ allQueueEvents.forEach((queueEvents, index) => {
         : { progress: data },
     );
   });
-});
+  });
+}
 
 // Health check function
 export async function getQueueHealth(): Promise<{
@@ -492,7 +552,9 @@ export async function closeQueues(): Promise<void> {
     syncQueueEvents.close(),
   ]);
 
-  await queueConnection.quit();
+  if (queueConnection) {
+    await queueConnection.quit();
+  }
   logger.info('All queues closed');
 }
 

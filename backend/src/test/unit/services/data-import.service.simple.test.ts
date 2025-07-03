@@ -8,11 +8,15 @@ jest.mock('fs/promises');
 jest.mock('csv-parse');
 jest.mock('xlsx');
 
+import { prisma } from '../../../lib/prisma';
+
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+
 describe('DataImportService', () => {
   let service: DataImportService;
 
   beforeEach(() => {
-    service = new DataImportService();
+    service = new DataImportService(mockPrisma);
     jest.clearAllMocks();
   });
 
@@ -66,7 +70,7 @@ describe('DataImportService', () => {
         },
         status: {
           targetField: 'status',
-          transform: (value: string) => value === 'active' ? 'OPERATIONAL' : 'MAINTENANCE',
+          transform: (value: string) => (value === 'active' ? 'OPERATIONAL' : 'MAINTENANCE'),
         },
       };
 
@@ -118,8 +122,9 @@ describe('DataImportService', () => {
         },
       };
 
-      expect(() => service['applyFieldMapping'](record, mapping))
-        .toThrow("Required field 'category' is missing or empty");
+      expect(() => service['applyFieldMapping'](record, mapping)).toThrow(
+        "Required field 'category' is missing or empty",
+      );
     });
   });
 
@@ -133,7 +138,7 @@ describe('DataImportService', () => {
 
       const sorted = service['sortLocationsByHierarchy'](locations);
 
-      expect(sorted.map(l => l.id)).toEqual(['1', '2', '3']);
+      expect(sorted.map((l) => l.id)).toEqual(['1', '2', '3']);
     });
 
     it('should handle multiple root locations', () => {

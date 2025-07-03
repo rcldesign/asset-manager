@@ -1,4 +1,4 @@
-import type { Location } from '@prisma/client';
+import type { Location, PrismaClient } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { AppError, NotFoundError, ConflictError } from '../utils/errors';
 
@@ -27,6 +27,12 @@ export interface LocationWithChildren extends Location {
  * @class LocationService
  */
 export class LocationService {
+  private prisma: PrismaClient;
+
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+  }
+
   /**
    * Create a new location with hierarchical placement.
    * Validates organization ownership and name uniqueness within parent.
@@ -54,7 +60,7 @@ export class LocationService {
   async createLocation(data: CreateLocationData): Promise<Location> {
     const { name, description, parentId, organizationId } = data;
 
-    return prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       // Check if organization exists
       const organization = await tx.organization.findUnique({
         where: { id: organizationId },
@@ -123,7 +129,7 @@ export class LocationService {
    * const location = await locationService.getLocationById('location-123', 'org-456');
    */
   async getLocationById(id: string, organizationId: string): Promise<Location | null> {
-    return prisma.location.findFirst({
+    return this.prisma.location.findFirst({
       where: { id, organizationId },
     });
   }
@@ -155,7 +161,7 @@ export class LocationService {
     data: UpdateLocationData,
     organizationId: string,
   ): Promise<Location> {
-    return prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       const location = await tx.location.findFirst({ where: { id, organizationId } });
       if (!location) {
         throw new NotFoundError('Location');
@@ -234,7 +240,7 @@ export class LocationService {
     newParentId: string | null,
     organizationId: string,
   ): Promise<Location> {
-    return prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       return this.moveLocationWithinTransaction(locationId, newParentId, organizationId, tx);
     });
   }
@@ -354,7 +360,7 @@ export class LocationService {
     }
 
     // Check for children
-    const childCount = await prisma.location.count({
+    const childCount = await this.prisma.location.count({
       where: { parentId: id, organizationId },
     });
 
@@ -363,7 +369,7 @@ export class LocationService {
     }
 
     // Check for assets
-    const assetCount = await prisma.asset.count({
+    const assetCount = await this.prisma.asset.count({
       where: { locationId: id, organizationId },
     });
 
@@ -371,7 +377,7 @@ export class LocationService {
       throw new ConflictError('Cannot delete location with assigned assets');
     }
 
-    await prisma.location.delete({
+    await this.prisma.location.delete({
       where: { id },
     });
   }
@@ -397,7 +403,7 @@ export class LocationService {
    * // }]
    */
   async findByOrganization(organizationId: string): Promise<LocationWithChildren[]> {
-    const locations = await prisma.location.findMany({
+    const locations = await this.prisma.location.findMany({
       where: { organizationId },
       orderBy: { path: 'asc' },
     });
@@ -448,7 +454,7 @@ export class LocationService {
       throw new NotFoundError('Location');
     }
 
-    return prisma.location.findMany({
+    return this.prisma.location.findMany({
       where: {
         organizationId,
         path: { startsWith: `${location.path}.` },
@@ -485,7 +491,7 @@ export class LocationService {
       return []; // Root location has no ancestors
     }
 
-    return prisma.location.findMany({
+    return this.prisma.location.findMany({
       where: {
         id: { in: ancestorIds },
         organizationId,
@@ -509,7 +515,7 @@ export class LocationService {
    * ], 'org-456');
    */
   async findByIds(ids: string[], organizationId: string): Promise<Location[]> {
-    return prisma.location.findMany({
+    return this.prisma.location.findMany({
       where: {
         id: { in: ids },
         organizationId,
@@ -534,7 +540,7 @@ export class LocationService {
    * const floors = await locationService.searchByName('org-123', '2nd');
    */
   async searchByName(organizationId: string, query: string): Promise<Location[]> {
-    return prisma.location.findMany({
+    return this.prisma.location.findMany({
       where: {
         organizationId,
         name: {
@@ -551,7 +557,7 @@ export class LocationService {
    * More efficient than building a tree and then flattening it.
    */
   async findAllFlat(organizationId: string): Promise<Location[]> {
-    return prisma.location.findMany({
+    return this.prisma.location.findMany({
       where: { organizationId },
       orderBy: { name: 'asc' },
     });

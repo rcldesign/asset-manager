@@ -6,7 +6,7 @@
 import { performance } from 'perf_hooks';
 import { PrismaClient } from '@prisma/client';
 import { DashboardService } from '../../services/dashboard.service';
-import { IRequestContext } from '../../interfaces/context.interface';
+import type { IRequestContext } from '../../interfaces/context.interface';
 
 const prisma = new PrismaClient();
 const dashboardService = new DashboardService(prisma);
@@ -47,7 +47,7 @@ describe('Dashboard Performance Tests', () => {
 
   async function createTestData() {
     console.log('Creating performance test data...');
-    
+
     // Create locations
     const locations = [];
     for (let i = 0; i < 10; i++) {
@@ -125,7 +125,8 @@ describe('Dashboard Performance Tests', () => {
           totpEnabled: false,
           isActive: true,
           notificationPreferences: {},
-          lastLogin: i % 5 === 0 ? new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000) : null,
+          lastLogin:
+            i % 5 === 0 ? new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000) : null,
         },
       });
     }
@@ -139,9 +140,9 @@ describe('Dashboard Performance Tests', () => {
 
     for (let i = 0; i < iterations; i++) {
       const start = performance.now();
-      
+
       const stats = await dashboardService.getDashboardStats(testContext);
-      
+
       const end = performance.now();
       const duration = end - start;
       times.push(duration);
@@ -161,7 +162,7 @@ describe('Dashboard Performance Tests', () => {
       Average: ${avgTime.toFixed(2)}ms
       Min: ${minTime.toFixed(2)}ms
       Max: ${maxTime.toFixed(2)}ms
-      Times: ${times.map(t => t.toFixed(2)).join(', ')}ms`);
+      Times: ${times.map((t) => t.toFixed(2)).join(', ')}ms`);
 
     // Performance assertion - should complete within 2 seconds
     expect(maxTime).toBeLessThan(2000);
@@ -170,7 +171,7 @@ describe('Dashboard Performance Tests', () => {
 
   it('should perform dashboard stats with filters efficiently', async () => {
     const start = performance.now();
-    
+
     const stats = await dashboardService.getDashboardStats(testContext, {
       assetCategoryFilter: ['EQUIPMENT', 'HARDWARE'],
       taskPriorityFilter: ['HIGH', 'MEDIUM'],
@@ -179,7 +180,7 @@ describe('Dashboard Performance Tests', () => {
         to: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       },
     });
-    
+
     const end = performance.now();
     const duration = end - start;
 
@@ -195,12 +196,12 @@ describe('Dashboard Performance Tests', () => {
 
   it('should perform trending data queries efficiently', async () => {
     const metrics = ['assets', 'tasks', 'completions'] as const;
-    
+
     for (const metric of metrics) {
       const start = performance.now();
-      
+
       const trendData = await dashboardService.getTrendingData(testContext, metric, 30);
-      
+
       const end = performance.now();
       const duration = end - start;
 
@@ -215,19 +216,19 @@ describe('Dashboard Performance Tests', () => {
     const concurrentRequests = 10;
     const start = performance.now();
 
-    const promises = Array(concurrentRequests).fill(0).map(() =>
-      dashboardService.getDashboardStats(testContext)
-    );
+    const promises = Array(concurrentRequests)
+      .fill(0)
+      .map(() => dashboardService.getDashboardStats(testContext));
 
     const results = await Promise.all(promises);
-    
+
     const end = performance.now();
     const duration = end - start;
 
     console.log(`${concurrentRequests} Concurrent Requests: ${duration.toFixed(2)}ms`);
 
     // All requests should return the same data
-    results.forEach(result => {
+    results.forEach((result) => {
       expect(result.assets.total).toBe(results[0].assets.total);
       expect(result.tasks.total).toBe(results[0].tasks.total);
     });
@@ -240,12 +241,7 @@ describe('Dashboard Performance Tests', () => {
     // Test the most complex dashboard query scenario
     const start = performance.now();
 
-    const [
-      stats,
-      assetTrend,
-      taskTrend,
-      completionTrend,
-    ] = await Promise.all([
+    const [stats, assetTrend, taskTrend, completionTrend] = await Promise.all([
       dashboardService.getDashboardStats(testContext),
       dashboardService.getTrendingData(testContext, 'assets', 30),
       dashboardService.getTrendingData(testContext, 'tasks', 30),

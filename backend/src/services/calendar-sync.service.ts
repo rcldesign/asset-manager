@@ -3,17 +3,19 @@ import { GoogleCalendarService } from './google-calendar.service';
 import { TaskService } from './task.service';
 import { logger } from '../utils/logger';
 import { addScheduleJob } from '../lib/queue';
-import type { Task } from '@prisma/client';
+import type { Task, PrismaClient } from '@prisma/client';
 
 /**
  * Service for synchronizing tasks with Google Calendar
  * Handles two-way sync between our task system and Google Calendar
  */
 export class CalendarSyncService {
+  private prisma: PrismaClient;
   private taskService: TaskService;
 
-  constructor() {
-    this.taskService = new TaskService();
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+    this.taskService = new TaskService(prismaClient);
   }
 
   /**
@@ -43,7 +45,7 @@ export class CalendarSyncService {
       }
 
       // Check for existing calendar sync record
-      const calendarIntegration = await prisma.calendarIntegration.findFirst({
+      const calendarIntegration = await this.prisma.calendarIntegration.findFirst({
         where: {
           userId,
           provider: 'GOOGLE',
@@ -57,7 +59,7 @@ export class CalendarSyncService {
       }
 
       // Look for existing sync record
-      const existingSync = await prisma.taskCalendarSync.findUnique({
+      const existingSync = await this.prisma.taskCalendarSync.findUnique({
         where: {
           taskId_calendarIntegrationId: {
             taskId,
@@ -78,7 +80,7 @@ export class CalendarSyncService {
           });
 
           // Update sync record
-          await prisma.taskCalendarSync.update({
+          await this.prisma.taskCalendarSync.update({
             where: { id: existingSync.id },
             data: {
               lastSyncedAt: new Date(),
@@ -101,7 +103,7 @@ export class CalendarSyncService {
           });
 
           // Create sync record
-          await prisma.taskCalendarSync.create({
+          await this.prisma.taskCalendarSync.create({
             data: {
               taskId,
               calendarIntegrationId: calendarIntegration.id,
@@ -118,7 +120,7 @@ export class CalendarSyncService {
           logger.warn('Google Calendar sync failed - invalid grant', { userId });
 
           // Disable sync for this user
-          await prisma.calendarIntegration.update({
+          await this.prisma.calendarIntegration.update({
             where: { id: calendarIntegration.id },
             data: { syncEnabled: false },
           });
@@ -151,7 +153,7 @@ export class CalendarSyncService {
   async removeTaskFromCalendar(taskId: string, userId: string): Promise<void> {
     try {
       // Find sync record
-      const syncRecord = await prisma.taskCalendarSync.findFirst({
+      const syncRecord = await this.prisma.taskCalendarSync.findFirst({
         where: {
           taskId,
           calendarIntegration: {
@@ -175,7 +177,7 @@ export class CalendarSyncService {
         await googleService.deleteTaskEvent(syncRecord.externalEventId);
 
         // Delete sync record
-        await prisma.taskCalendarSync.delete({
+        await this.prisma.taskCalendarSync.delete({
           where: { id: syncRecord.id },
         });
 
@@ -186,7 +188,7 @@ export class CalendarSyncService {
       } catch (error: any) {
         // If event is already deleted in Google, just clean up our record
         if (error.code === 404 || error.response?.status === 404) {
-          await prisma.taskCalendarSync.delete({
+          await this.prisma.taskCalendarSync.delete({
             where: { id: syncRecord.id },
           });
           return;
@@ -231,7 +233,7 @@ export class CalendarSyncService {
 
     try {
       // Get user's organization
-      const user = await prisma.user.findUnique({
+      const user = await this.prisma.user.findUnique({
         where: { id: userId },
         select: { organizationId: true },
       });
@@ -241,7 +243,7 @@ export class CalendarSyncService {
       }
 
       // Get user's tasks
-      const tasks = await prisma.task.findMany({
+      const tasks = await this.prisma.task.findMany({
         where: {
           organizationId: user.organizationId,
           assignments: {
@@ -297,7 +299,7 @@ export class CalendarSyncService {
    * @param userId - User ID
    */
   async enableCalendarSync(userId: string): Promise<void> {
-    await prisma.calendarIntegration.upsert({
+    await this.prisma.calendarIntegration.upsert({
       where: {
         userId_provider: {
           userId,
@@ -338,7 +340,7 @@ export class CalendarSyncService {
    * @param userId - User ID
    */
   async disableCalendarSync(userId: string): Promise<void> {
-    await prisma.calendarIntegration.updateMany({
+    await this.prisma.calendarIntegration.updateMany({
       where: {
         userId,
         provider: 'GOOGLE',
@@ -377,7 +379,7 @@ export class CalendarSyncService {
    * @returns True if task has changed
    */
   async taskNeedsSync(taskId: string, currentTask: Partial<Task>): Promise<boolean> {
-    const syncRecord = await prisma.taskCalendarSync.findFirst({
+    const syncRecord = await this.prisma.taskCalendarSync.findFirst({
       where: { taskId },
     });
 

@@ -16,13 +16,17 @@ const syncStatusQuerySchema = z.object({
 const syncRequestSchema = z.object({
   deviceId: z.string().max(100),
   lastSyncTimestamp: z.string().datetime().optional(),
-  pendingChanges: z.array(z.object({
-    type: z.enum(['asset', 'task', 'location']),
-    id: z.string().uuid(),
-    action: z.enum(['create', 'update', 'delete']),
-    data: z.record(z.any()).optional(),
-    timestamp: z.string().datetime(),
-  })).optional(),
+  pendingChanges: z
+    .array(
+      z.object({
+        type: z.enum(['asset', 'task', 'location']),
+        id: z.string().uuid(),
+        action: z.enum(['create', 'update', 'delete']),
+        data: z.record(z.any()).optional(),
+        timestamp: z.string().datetime(),
+      }),
+    )
+    .optional(),
 });
 
 /**
@@ -107,7 +111,7 @@ router.get(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -137,99 +141,94 @@ router.get(
  *       401:
  *         description: Unauthorized
  */
-router.post(
-  '/pull',
-  authMiddleware,
-  validateBody(syncRequestSchema),
-  async (req, res, next) => {
-    try {
-      const authenticatedReq = req as AuthenticatedRequest;
-      const { lastSyncTimestamp, deviceId } = req.body;
+router.post('/pull', authMiddleware, validateBody(syncRequestSchema), async (req, res, next) => {
+  try {
+    const authenticatedReq = req as AuthenticatedRequest;
+    const { lastSyncTimestamp, deviceId } = req.body;
 
-      const lastSync = lastSyncTimestamp ? new Date(lastSyncTimestamp) : new Date(0);
-      const now = new Date();
+    const lastSync = lastSyncTimestamp ? new Date(lastSyncTimestamp) : new Date(0);
+    const now = new Date();
 
-      // Get changed data since last sync
-      const [assets, tasks, locations] = await Promise.all([
-        prisma.asset.findMany({
-          where: {
-            organizationId: authenticatedReq.user.organizationId,
-            updatedAt: { gt: lastSync },
+    // Get changed data since last sync
+    const [assets, tasks, locations] = await Promise.all([
+      prisma.asset.findMany({
+        where: {
+          organizationId: authenticatedReq.user.organizationId,
+          updatedAt: { gt: lastSync },
+        },
+        include: {
+          location: {
+            select: { id: true, name: true },
           },
-          include: {
-            location: {
-              select: { id: true, name: true },
-            },
-            assetTemplate: {
-              select: { id: true, name: true },
-            },
+          assetTemplate: {
+            select: { id: true, name: true },
           },
-          orderBy: { updatedAt: 'asc' },
-        }),
-        prisma.task.findMany({
-          where: {
-            organizationId: authenticatedReq.user.organizationId,
-            updatedAt: { gt: lastSync },
+        },
+        orderBy: { updatedAt: 'asc' },
+      }),
+      prisma.task.findMany({
+        where: {
+          organizationId: authenticatedReq.user.organizationId,
+          updatedAt: { gt: lastSync },
+        },
+        include: {
+          asset: {
+            select: { id: true, name: true },
           },
-          include: {
-            asset: {
-              select: { id: true, name: true },
-            },
-            assignments: {
-              include: {
-                user: {
-                  select: { id: true, email: true, fullName: true },
-                },
+          assignments: {
+            include: {
+              user: {
+                select: { id: true, email: true, fullName: true },
               },
             },
           },
-          orderBy: { updatedAt: 'asc' },
-        }),
-        prisma.location.findMany({
-          where: {
-            organizationId: authenticatedReq.user.organizationId,
-            updatedAt: { gt: lastSync },
-          },
-          orderBy: { updatedAt: 'asc' },
-        }),
-      ]);
-
-      const syncResponse = {
-        syncTimestamp: now.toISOString(),
-        deviceId,
-        changes: {
-          assets: assets.map(asset => ({
-            type: 'asset' as const,
-            action: 'update' as const,
-            id: asset.id,
-            data: asset,
-            timestamp: asset.updatedAt.toISOString(),
-          })),
-          tasks: tasks.map(task => ({
-            type: 'task' as const,
-            action: 'update' as const,
-            id: task.id,
-            data: task,
-            timestamp: task.updatedAt.toISOString(),
-          })),
-          locations: locations.map(location => ({
-            type: 'location' as const,
-            action: 'update' as const,
-            id: location.id,
-            data: location,
-            timestamp: location.updatedAt.toISOString(),
-          })),
         },
-        hasMoreChanges: false, // Could implement pagination if needed
-        nextSyncToken: now.toISOString(),
-      };
+        orderBy: { updatedAt: 'asc' },
+      }),
+      prisma.location.findMany({
+        where: {
+          organizationId: authenticatedReq.user.organizationId,
+          updatedAt: { gt: lastSync },
+        },
+        orderBy: { updatedAt: 'asc' },
+      }),
+    ]);
 
-      res.json(syncResponse);
-    } catch (error) {
-      next(error);
-    }
+    const syncResponse = {
+      syncTimestamp: now.toISOString(),
+      deviceId,
+      changes: {
+        assets: assets.map((asset) => ({
+          type: 'asset' as const,
+          action: 'update' as const,
+          id: asset.id,
+          data: asset,
+          timestamp: asset.updatedAt.toISOString(),
+        })),
+        tasks: tasks.map((task) => ({
+          type: 'task' as const,
+          action: 'update' as const,
+          id: task.id,
+          data: task,
+          timestamp: task.updatedAt.toISOString(),
+        })),
+        locations: locations.map((location) => ({
+          type: 'location' as const,
+          action: 'update' as const,
+          id: location.id,
+          data: location,
+          timestamp: location.updatedAt.toISOString(),
+        })),
+      },
+      hasMoreChanges: false, // Could implement pagination if needed
+      nextSyncToken: now.toISOString(),
+    };
+
+    res.json(syncResponse);
+  } catch (error) {
+    next(error);
   }
-);
+});
 
 /**
  * @swagger
@@ -304,118 +303,114 @@ router.post(
  *       401:
  *         description: Unauthorized
  */
-router.post(
-  '/push',
-  authMiddleware,
-  async (req, res, next) => {
-    try {
-      const authenticatedReq = req as AuthenticatedRequest;
-      const { deviceId, changes } = req.body;
+router.post('/push', authMiddleware, async (req, res, next) => {
+  try {
+    const authenticatedReq = req as AuthenticatedRequest;
+    const { deviceId, changes } = req.body;
 
-      if (!Array.isArray(changes)) {
-        throw new ValidationError('Changes must be an array');
-      }
+    if (!Array.isArray(changes)) {
+      throw new ValidationError('Changes must be an array');
+    }
 
-      const conflicts: any[] = [];
-      let processedChanges = 0;
+    const conflicts: any[] = [];
+    let processedChanges = 0;
 
-      // Process each change
-      for (const change of changes) {
-        try {
-          const { type, id, action, data, timestamp } = change;
+    // Process each change
+    for (const change of changes) {
+      try {
+        const { type, id, action, data, timestamp } = change;
 
-          // Validate change format
-          if (!type || !id || !action) {
-            conflicts.push({
-              changeId: id || 'unknown',
-              type: 'validation',
-              reason: 'Missing required fields',
-              clientData: change,
-            });
-            continue;
-          }
-
-          // Check if record exists and hasn't been modified since client change
-          let existingRecord: any = null;
-          const changeTimestamp = new Date(timestamp);
-
-          switch (type) {
-            case 'asset':
-              existingRecord = await prisma.asset.findFirst({
-                where: {
-                  id,
-                  organizationId: authenticatedReq.user.organizationId,
-                },
-              });
-              break;
-            case 'task':
-              existingRecord = await prisma.task.findFirst({
-                where: {
-                  id,
-                  organizationId: authenticatedReq.user.organizationId,
-                },
-              });
-              break;
-            case 'location':
-              existingRecord = await prisma.location.findFirst({
-                where: {
-                  id,
-                  organizationId: authenticatedReq.user.organizationId,
-                },
-              });
-              break;
-          }
-
-          // Check for conflicts
-          if (existingRecord && existingRecord.updatedAt > changeTimestamp) {
-            conflicts.push({
-              changeId: id,
-              type: 'conflict',
-              reason: 'Record modified on server after client change',
-              serverData: existingRecord,
-              clientData: data,
-            });
-            continue;
-          }
-
-          // Apply the change (simplified - would need proper validation and service calls)
-          switch (action) {
-            case 'create':
-              // Would use appropriate service to create
-              break;
-            case 'update':
-              // Would use appropriate service to update
-              break;
-            case 'delete':
-              // Would use appropriate service to delete
-              break;
-          }
-
-          processedChanges++;
-        } catch (error) {
+        // Validate change format
+        if (!type || !id || !action) {
           conflicts.push({
-            changeId: change.id || 'unknown',
-            type: 'error',
-            reason: error instanceof Error ? error.message : 'Unknown error',
+            changeId: id || 'unknown',
+            type: 'validation',
+            reason: 'Missing required fields',
             clientData: change,
           });
+          continue;
         }
+
+        // Check if record exists and hasn't been modified since client change
+        let existingRecord: any = null;
+        const changeTimestamp = new Date(timestamp);
+
+        switch (type) {
+          case 'asset':
+            existingRecord = await prisma.asset.findFirst({
+              where: {
+                id,
+                organizationId: authenticatedReq.user.organizationId,
+              },
+            });
+            break;
+          case 'task':
+            existingRecord = await prisma.task.findFirst({
+              where: {
+                id,
+                organizationId: authenticatedReq.user.organizationId,
+              },
+            });
+            break;
+          case 'location':
+            existingRecord = await prisma.location.findFirst({
+              where: {
+                id,
+                organizationId: authenticatedReq.user.organizationId,
+              },
+            });
+            break;
+        }
+
+        // Check for conflicts
+        if (existingRecord && existingRecord.updatedAt > changeTimestamp) {
+          conflicts.push({
+            changeId: id,
+            type: 'conflict',
+            reason: 'Record modified on server after client change',
+            serverData: existingRecord,
+            clientData: data,
+          });
+          continue;
+        }
+
+        // Apply the change (simplified - would need proper validation and service calls)
+        switch (action) {
+          case 'create':
+            // Would use appropriate service to create
+            break;
+          case 'update':
+            // Would use appropriate service to update
+            break;
+          case 'delete':
+            // Would use appropriate service to delete
+            break;
+        }
+
+        processedChanges++;
+      } catch (error) {
+        conflicts.push({
+          changeId: change.id || 'unknown',
+          type: 'error',
+          reason: error instanceof Error ? error.message : 'Unknown error',
+          clientData: change,
+        });
       }
-
-      const response = {
-        syncTimestamp: new Date().toISOString(),
-        deviceId,
-        processedChanges,
-        conflicts,
-        success: conflicts.length === 0,
-      };
-
-      res.json(response);
-    } catch (error) {
-      next(error);
     }
+
+    const response = {
+      syncTimestamp: new Date().toISOString(),
+      deviceId,
+      processedChanges,
+      conflicts,
+      success: conflicts.length === 0,
+    };
+
+    res.json(response);
+  } catch (error) {
+    next(error);
   }
-);
+});
 
 /**
  * @swagger
@@ -453,29 +448,25 @@ router.post(
  *       401:
  *         description: Unauthorized
  */
-router.post(
-  '/reset',
-  authMiddleware,
-  async (req, res, next) => {
-    try {
-      const { deviceId } = req.body;
+router.post('/reset', authMiddleware, async (req, res, next) => {
+  try {
+    const { deviceId } = req.body;
 
-      if (!deviceId) {
-        throw new ValidationError('Device ID is required');
-      }
-
-      // Clear any stored sync state for this device
-      // This would typically involve clearing cached data or sync tokens
-      
-      res.json({
-        message: 'Sync state reset successfully',
-        resetAt: new Date().toISOString(),
-        deviceId,
-      });
-    } catch (error) {
-      next(error);
+    if (!deviceId) {
+      throw new ValidationError('Device ID is required');
     }
+
+    // Clear any stored sync state for this device
+    // This would typically involve clearing cached data or sync tokens
+
+    res.json({
+      message: 'Sync state reset successfully',
+      resetAt: new Date().toISOString(),
+      deviceId,
+    });
+  } catch (error) {
+    next(error);
   }
-);
+});
 
 export default router;

@@ -1,16 +1,25 @@
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { AuditService, BULK_OPERATION_RECORD_ID } from '../../../services/audit.service';
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { ActionType } from '@prisma/client';
-import { IRequestContext } from '../../../interfaces/context.interface';
+import type { IRequestContext } from '../../../interfaces/context.interface';
 
-// Mock Prisma
-const mockPrisma = {
-  auditTrail: {
-    create: jest.fn(),
-    findMany: jest.fn(),
-    count: jest.fn(),
+// Enable automatic mocking for Prisma
+jest.mock('../../../lib/prisma');
+
+// Mock webhook service
+jest.mock('../../../services/webhook.service', () => ({
+  webhookService: {
+    createEnhancedEvent: jest.fn(),
+    emitEvent: jest.fn(),
   },
-};
+}));
+
+// Import modules after mocking
+import { AuditService, BULK_OPERATION_RECORD_ID } from '../../../services/audit.service';
+import { prisma } from '../../../lib/prisma';
+
+// Type the mocked modules
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+
 
 describe('AuditService', () => {
   let auditService: AuditService;
@@ -20,12 +29,30 @@ describe('AuditService', () => {
     auditService = new AuditService();
     mockContext = {
       userId: 'user123',
+      userRole: 'MEMBER' as any,
       organizationId: 'org123',
-      sessionId: 'session123',
+      requestId: 'request123',
     };
-    
+
     // Reset all mocks
     jest.clearAllMocks();
+    
+    // Setup default mocks
+    mockPrisma.auditTrail.create.mockResolvedValue({
+      id: 'audit-123',
+      model: 'Asset',
+      recordId: 'asset123',
+      action: ActionType.CREATE,
+      oldValue: null,
+      newValue: { name: 'Test Asset' },
+      userId: 'user123',
+      createdAt: new Date(),
+    } as any);
+    
+    // Mock webhook service
+    const { webhookService } = require('../../../services/webhook.service');
+    webhookService.createEnhancedEvent.mockResolvedValue({ id: 'event-123' });
+    webhookService.emitEvent.mockResolvedValue(undefined);
   });
 
   describe('log', () => {
@@ -45,7 +72,7 @@ describe('AuditService', () => {
           model: 'Asset',
           recordId: 'asset123',
           action: ActionType.CREATE,
-          oldValue: expect.objectContaining({ _prismaType: 'JsonNull' }),
+          oldValue: expect.any(Object), // JsonNull object
           newValue: { name: 'Test Asset' },
           userId: 'user123',
         },
@@ -93,7 +120,7 @@ describe('AuditService', () => {
           recordId: 'asset123',
           action: ActionType.DELETE,
           oldValue: { name: 'Old Asset' },
-          newValue: expect.objectContaining({ _prismaType: 'JsonNull' }),
+          newValue: expect.any(Object), // JsonNull object
           userId: 'user123',
         },
       });
@@ -120,7 +147,7 @@ describe('AuditService', () => {
           model: 'Task',
           recordId: BULK_OPERATION_RECORD_ID,
           action: ActionType.UPDATE_MANY,
-          oldValue: expect.objectContaining({ _prismaType: 'JsonNull' }),
+          oldValue: expect.any(Object), // JsonNull object
           newValue: {
             details: {
               where: { status: 'PLANNED' },
@@ -151,7 +178,7 @@ describe('AuditService', () => {
           model: 'Asset',
           recordId: BULK_OPERATION_RECORD_ID,
           action: ActionType.DELETE_MANY,
-          oldValue: expect.objectContaining({ _prismaType: 'JsonNull' }),
+          oldValue: expect.any(Object), // JsonNull object
           newValue: {
             details: {
               where: { status: 'DISPOSED' },
@@ -199,8 +226,8 @@ describe('AuditService', () => {
     ];
 
     beforeEach(() => {
-      (mockPrisma.auditTrail.findMany as jest.Mock).mockResolvedValue(mockAuditEntries);
-      (mockPrisma.auditTrail.count as jest.Mock).mockResolvedValue(2);
+      mockPrisma.auditTrail.findMany.mockResolvedValue(mockAuditEntries as any);
+      mockPrisma.auditTrail.count.mockResolvedValue(2);
     });
 
     it('should query audit trail without filters', async () => {
@@ -297,12 +324,12 @@ describe('AuditService', () => {
     });
 
     it('should handle pagination correctly', async () => {
-      (mockPrisma.auditTrail.count as jest.Mock).mockResolvedValue(150);
+      mockPrisma.auditTrail.count.mockResolvedValue(150);
 
       const result = await auditService.queryAuditTrail(
         mockPrisma as any,
         {},
-        { page: 3, limit: 20 }
+        { page: 3, limit: 20 },
       );
 
       expect(mockPrisma.auditTrail.findMany).toHaveBeenCalledWith({

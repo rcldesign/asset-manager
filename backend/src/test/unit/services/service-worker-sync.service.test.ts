@@ -1,4 +1,8 @@
-import { ServiceWorkerSyncService, ServiceWorkerSyncEvent, BackgroundSyncRegistration } from '../../../services/service-worker-sync.service';
+import type {
+  ServiceWorkerSyncEvent,
+  BackgroundSyncRegistration,
+} from '../../../services/service-worker-sync.service';
+import { ServiceWorkerSyncService } from '../../../services/service-worker-sync.service';
 import { prisma } from '../../../lib/prisma';
 import { addSyncJob } from '../../../lib/queue';
 
@@ -80,7 +84,7 @@ describe('ServiceWorkerSyncService', () => {
       (prisma.syncClient.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(
-        service.registerBackgroundSync(mockUserId, mockDeviceId, mockRegistration)
+        service.registerBackgroundSync(mockUserId, mockDeviceId, mockRegistration),
       ).rejects.toThrow('Sync client not found');
     });
 
@@ -99,7 +103,7 @@ describe('ServiceWorkerSyncService', () => {
 
       const updateCall = (prisma.syncClient.update as jest.Mock).mock.calls[0][0];
       const parsedToken = JSON.parse(updateCall.data.syncToken);
-      
+
       expect(parsedToken.existingData).toBe('test');
       expect(parsedToken.backgroundSync).toBeDefined();
     });
@@ -152,7 +156,7 @@ describe('ServiceWorkerSyncService', () => {
 
     it('should process sync-critical tag correctly', async () => {
       const criticalEvent = { ...mockSyncEvent, tag: 'sync-critical' };
-      
+
       await service.processSyncEvent(criticalEvent);
 
       expect(addSyncJob).toHaveBeenCalledWith({
@@ -165,7 +169,7 @@ describe('ServiceWorkerSyncService', () => {
 
     it('should process sync-assets tag correctly', async () => {
       const assetsEvent = { ...mockSyncEvent, tag: 'sync-assets' };
-      
+
       await service.processSyncEvent(assetsEvent);
 
       expect(addSyncJob).toHaveBeenCalledWith({
@@ -178,7 +182,7 @@ describe('ServiceWorkerSyncService', () => {
 
     it('should process sync-tasks tag correctly', async () => {
       const tasksEvent = { ...mockSyncEvent, tag: 'sync-tasks' };
-      
+
       await service.processSyncEvent(tasksEvent);
 
       expect(addSyncJob).toHaveBeenCalledWith({
@@ -191,7 +195,7 @@ describe('ServiceWorkerSyncService', () => {
 
     it('should handle custom sync tags', async () => {
       const customEvent = { ...mockSyncEvent, tag: 'custom-tag' };
-      
+
       await service.processSyncEvent(customEvent);
 
       expect(addSyncJob).toHaveBeenCalledWith({
@@ -204,7 +208,7 @@ describe('ServiceWorkerSyncService', () => {
 
     it('should handle no pending items gracefully', async () => {
       (prisma.syncQueue.findMany as jest.Mock).mockResolvedValue([]);
-      
+
       await service.processSyncEvent(mockSyncEvent);
 
       expect(addSyncJob).not.toHaveBeenCalled();
@@ -403,7 +407,7 @@ describe('ServiceWorkerSyncService', () => {
 
       expect(result.activeClients).toBe(0);
       expect(result.recommendations).toContain(
-        'No active sync clients. Ensure PWA is properly configured.'
+        'No active sync clients. Ensure PWA is properly configured.',
       );
     });
 
@@ -418,7 +422,7 @@ describe('ServiceWorkerSyncService', () => {
       expect(result.failureRate).toBe(0.3);
       expect(result.healthScore).toBeLessThan(80); // Penalized for high failure rate
       expect(result.recommendations).toContain(
-        'High failure rate. Check network connectivity and conflict resolution.'
+        'High failure rate. Check network connectivity and conflict resolution.',
       );
     });
 

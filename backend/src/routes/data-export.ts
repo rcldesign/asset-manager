@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { validateRequest } from '../middleware/validation';
 import { dataExportService } from '../services/data-export.service';
@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../utils/asyncHandler';
 import * as fs from 'fs/promises';
 import path from 'path';
+import type { AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -24,9 +25,9 @@ router.post(
   validateRequest({
     body: exportOptionsSchema,
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const result = await dataExportService.exportAssets(req.context!, req.body);
-    
+
     res.json({
       success: true,
       data: {
@@ -37,7 +38,7 @@ router.post(
         createdAt: result.createdAt,
       },
     });
-  })
+  }),
 );
 
 // Task export endpoint
@@ -47,9 +48,9 @@ router.post(
   validateRequest({
     body: exportOptionsSchema,
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const result = await dataExportService.exportTasks(req.context!, req.body);
-    
+
     res.json({
       success: true,
       data: {
@@ -60,7 +61,7 @@ router.post(
         createdAt: result.createdAt,
       },
     });
-  })
+  }),
 );
 
 // Location export endpoint
@@ -70,9 +71,9 @@ router.post(
   validateRequest({
     body: exportOptionsSchema,
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const result = await dataExportService.exportLocations(req.context!, req.body);
-    
+
     res.json({
       success: true,
       data: {
@@ -83,7 +84,7 @@ router.post(
         createdAt: result.createdAt,
       },
     });
-  })
+  }),
 );
 
 // User data export (GDPR)
@@ -95,19 +96,22 @@ router.post(
       userId: z.string().uuid(),
     }),
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     // Users can only export their own data unless they're an admin
-    if (req.context!.userId !== req.params.userId && 
-        req.context!.userRole !== 'OWNER' && 
-        req.context!.userRole !== 'MANAGER') {
-      return res.status(403).json({
+    if (
+      req.context!.userId !== req.params.userId &&
+      req.context!.userRole !== 'OWNER' &&
+      req.context!.userRole !== 'MANAGER'
+    ) {
+      res.status(403).json({
         success: false,
         error: 'You can only export your own data',
       });
+      return;
     }
 
-    const result = await dataExportService.exportUserData(req.context!, req.params.userId);
-    
+    const result = await dataExportService.exportUserData(req.context!, req.params.userId!);
+
     res.json({
       success: true,
       data: {
@@ -118,35 +122,36 @@ router.post(
         createdAt: result.createdAt,
       },
     });
-  })
+  }),
 );
 
 // Download exported file
 router.get(
   '/download/:fileName',
   authMiddleware,
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { fileName } = req.params;
-    
+
     // Security: Ensure fileName doesn't contain path traversal
-    if (fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
-      return res.status(400).json({
+    if (!fileName || fileName.includes('..') || fileName.includes('/') || fileName.includes('\\')) {
+      res.status(400).json({
         success: false,
         error: 'Invalid file name',
       });
+      return;
     }
 
     const exportPath = process.env.EXPORT_PATH || path.join(process.cwd(), 'exports');
-    const filePath = path.join(exportPath, fileName);
+    const filePath = path.join(exportPath, fileName!);
 
     try {
       // Check if file exists
       await fs.access(filePath);
-      
+
       // Set appropriate headers based on file extension
-      const ext = path.extname(fileName).toLowerCase();
+      const ext = path.extname(fileName!).toLowerCase();
       let contentType = 'application/octet-stream';
-      
+
       switch (ext) {
         case '.json':
           contentType = 'application/json';
@@ -160,8 +165,8 @@ router.get(
       }
 
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName!}"`);
+
       // Stream the file
       const fileContent = await fs.readFile(filePath);
       res.send(fileContent);
@@ -182,7 +187,7 @@ router.get(
         error: 'Export file not found',
       });
     }
-  })
+  }),
 );
 
 // Cleanup old exports (admin only)
@@ -194,17 +199,18 @@ router.post(
       daysToKeep: z.number().min(1).max(365).default(7),
     }),
   }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     // Only admins can trigger cleanup
     if (req.context!.userRole !== 'OWNER' && req.context!.userRole !== 'MANAGER') {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         error: 'Only administrators can trigger export cleanup',
       });
+      return;
     }
 
     const deletedCount = await dataExportService.cleanupOldExports(req.body.daysToKeep);
-    
+
     res.json({
       success: true,
       data: {
@@ -212,7 +218,7 @@ router.post(
         message: `Deleted ${deletedCount} export files older than ${req.body.daysToKeep} days`,
       },
     });
-  })
+  }),
 );
 
 export default router;

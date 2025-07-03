@@ -1,5 +1,5 @@
 import { WebhookService } from '../../../services/webhook.service';
-import { prismaMock } from '../../prisma-singleton';
+import { prismaMock } from '../../../test/prisma-singleton';
 import axios from 'axios';
 import * as queue from '../../../lib/queue';
 
@@ -334,6 +334,7 @@ describe('WebhookService', () => {
           id: mockEvent.id,
           type: mockEvent.type,
           timestamp: mockEvent.timestamp.toISOString(),
+          organizationId: mockEvent.organizationId,
           data: mockEvent.data,
           metadata: {},
         },

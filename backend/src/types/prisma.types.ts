@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 
 /**
  * Type for the transactional Prisma client used inside $transaction calls.

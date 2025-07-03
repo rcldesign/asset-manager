@@ -1,14 +1,14 @@
 /**
  * Report Types and Interfaces
- * 
+ *
  * Defines the data structures for various report types:
  * - Asset Reports
- * - Task Reports  
+ * - Task Reports
  * - User Reports
  * - Custom Reports
  */
 
-import type { AssetCategory, AssetStatus, TaskStatus, TaskPriority } from '@prisma/client';
+import type { AssetCategory, TaskStatus, TaskPriority } from '@prisma/client';
 
 /**
  * Report formats supported
@@ -17,7 +17,7 @@ export enum ReportFormat {
   JSON = 'json',
   CSV = 'csv',
   PDF = 'pdf',
-  EXCEL = 'excel'
+  EXCEL = 'excel',
 }
 
 /**
@@ -51,14 +51,14 @@ export interface AssetAgeAnalysisReport {
       ageInYears: number;
     } | null;
   };
-  
+
   ageDistribution: {
     range: string;
     count: number;
     percentage: number;
     totalValue: number;
   }[];
-  
+
   byCategory: {
     category: AssetCategory;
     count: number;
@@ -66,7 +66,7 @@ export interface AssetAgeAnalysisReport {
     oldestAge: number;
     newestAge: number;
   }[];
-  
+
   depreciation: {
     originalValue: number;
     currentValue: number;
@@ -86,7 +86,7 @@ export interface AssetWarrantyReport {
     expiredWarranty: number;
     noWarranty: number;
   };
-  
+
   expiringWarranties: {
     assetId: string;
     assetName: string;
@@ -97,7 +97,7 @@ export interface AssetWarrantyReport {
     daysUntilExpiry: number;
     warrantyScope?: string;
   }[];
-  
+
   warrantyByCategory: {
     category: AssetCategory;
     totalAssets: number;
@@ -105,7 +105,7 @@ export interface AssetWarrantyReport {
     lifetimeWarranty: number;
     avgWarrantyDays: number;
   }[];
-  
+
   warrantyByVendor: {
     manufacturer: string;
     assetCount: number;
@@ -126,7 +126,7 @@ export interface AssetMaintenanceReport {
     totalCost: number;
     avgCostPerTask: number;
   };
-  
+
   maintenanceByAsset: {
     assetId: string;
     assetName: string;
@@ -137,7 +137,7 @@ export interface AssetMaintenanceReport {
     lastMaintenance: Date | null;
     nextScheduled: Date | null;
   }[];
-  
+
   maintenanceByCategory: {
     category: AssetCategory;
     taskCount: number;
@@ -145,7 +145,7 @@ export interface AssetMaintenanceReport {
     avgCost: number;
     completionRate: number;
   }[];
-  
+
   costAnalysis: {
     estimatedVsActual: {
       totalEstimated: number;
@@ -172,13 +172,13 @@ export interface TaskCompletionReport {
     avgCompletionTime: number; // hours
     onTimeCompletionRate: number;
   };
-  
+
   byStatus: {
     status: TaskStatus;
     count: number;
     percentage: number;
   }[];
-  
+
   byPriority: {
     priority: TaskPriority;
     totalTasks: number;
@@ -187,7 +187,7 @@ export interface TaskCompletionReport {
     avgCompletionTime: number;
     onTimeRate: number;
   }[];
-  
+
   completionTrend: {
     period: string;
     created: number;
@@ -195,7 +195,7 @@ export interface TaskCompletionReport {
     completionRate: number;
     avgCompletionTime: number;
   }[];
-  
+
   delayAnalysis: {
     totalDelayed: number;
     avgDelayDays: number;
@@ -218,7 +218,7 @@ export interface TaskCostReport {
     variancePercentage: number;
     avgCostPerTask: number;
   };
-  
+
   byCategory: {
     category: string;
     taskCount: number;
@@ -227,14 +227,14 @@ export interface TaskCostReport {
     variance: number;
     variancePercentage: number;
   }[];
-  
+
   byPriority: {
     priority: TaskPriority;
     taskCount: number;
     totalCost: number;
     avgCost: number;
   }[];
-  
+
   overBudgetTasks: {
     taskId: string;
     title: string;
@@ -244,7 +244,7 @@ export interface TaskCostReport {
     overageAmount: number;
     overagePercentage: number;
   }[];
-  
+
   costTrend: {
     period: string;
     estimatedCost: number;
@@ -264,7 +264,7 @@ export interface UserWorkloadReport {
     avgTasksPerUser: number;
     avgCompletionRate: number;
   };
-  
+
   userMetrics: {
     userId: string;
     userName: string;
@@ -279,7 +279,7 @@ export interface UserWorkloadReport {
     totalActualHours: number;
     efficiency: number; // actual/estimated
   }[];
-  
+
   workloadDistribution: {
     balanced: boolean;
     standardDeviation: number;
@@ -296,7 +296,7 @@ export interface UserWorkloadReport {
       hoursAllocated: number;
     }[];
   };
-  
+
   teamPerformance: {
     topPerformers: {
       userId: string;
@@ -320,7 +320,7 @@ export interface UserPerformanceReport {
   userId: string;
   userName: string;
   period: { startDate: Date; endDate: Date };
-  
+
   taskMetrics: {
     assigned: number;
     completed: number;
@@ -330,7 +330,7 @@ export interface UserPerformanceReport {
     completionRate: number;
     onTimeRate: number;
   };
-  
+
   timeMetrics: {
     totalEstimatedHours: number;
     totalActualHours: number;
@@ -338,14 +338,14 @@ export interface UserPerformanceReport {
     efficiency: number;
     overtimeHours: number;
   };
-  
+
   qualityMetrics: {
     reworkRequired: number;
     firstTimeRight: number;
     customerSatisfaction?: number;
     avgTaskRating?: number;
   };
-  
+
   trendAnalysis: {
     period: string;
     completed: number;
@@ -361,26 +361,33 @@ export interface CustomReportConfig {
   name: string;
   description?: string;
   entity: 'asset' | 'task' | 'user' | 'location' | 'schedule';
-  
+
   fields: {
     field: string;
     label: string;
     type: 'string' | 'number' | 'date' | 'boolean' | 'enum';
     aggregate?: 'count' | 'sum' | 'avg' | 'min' | 'max';
   }[];
-  
+
   filters: {
     field: string;
-    operator: 'equals' | 'not_equals' | 'contains' | 'greater_than' | 'less_than' | 'between' | 'in';
+    operator:
+      | 'equals'
+      | 'not_equals'
+      | 'contains'
+      | 'greater_than'
+      | 'less_than'
+      | 'between'
+      | 'in';
     value: any;
   }[];
-  
+
   groupBy?: string[];
   orderBy?: {
     field: string;
     direction: 'asc' | 'desc';
   }[];
-  
+
   includeRelations?: string[];
 }
 

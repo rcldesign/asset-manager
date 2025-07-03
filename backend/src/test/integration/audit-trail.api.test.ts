@@ -114,7 +114,7 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
       expect(response.body).toHaveProperty('entries');
       expect(response.body).toHaveProperty('pagination');
       expect(response.body.entries).toHaveLength(3);
-      
+
       const entry = response.body.entries[0];
       expect(entry).toHaveProperty('action');
       expect(entry).toHaveProperty('entityType');
@@ -198,7 +198,7 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
 
       const timestamps = response.body.entries.map((entry: any) => new Date(entry.timestamp));
       for (let i = 1; i < timestamps.length; i++) {
-        expect(timestamps[i-1].getTime()).toBeGreaterThanOrEqual(timestamps[i].getTime());
+        expect(timestamps[i - 1].getTime()).toBeGreaterThanOrEqual(timestamps[i].getTime());
       }
     });
 
@@ -219,9 +219,7 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
     });
 
     it('should require authentication', async () => {
-      await request(app)
-        .get('/api/audit-trail')
-        .expect(401);
+      await request(app).get('/api/audit-trail').expect(401);
     });
 
     it('should only return entries for user organization', async () => {
@@ -420,7 +418,7 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
 
     it('should filter stats by date range', async () => {
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      
+
       const response = await request(app)
         .get('/api/audit-trail/stats')
         .query({ startDate: oneDayAgo.toISOString() })
@@ -463,9 +461,9 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
             entityId: testAsset.id,
             userId: testUser.id,
             organizationId: testOrganization.id,
-            changes: { 
+            changes: {
               old: { status: 'OPERATIONAL' },
-              new: { status: 'MAINTENANCE' }
+              new: { status: 'MAINTENANCE' },
             },
             ipAddress: '192.168.1.1',
             timestamp: new Date('2024-01-15T11:00:00Z'),
@@ -484,7 +482,7 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
       expect(response.headers['content-type']).toBe('text/csv; charset=utf-8');
       expect(response.headers['content-disposition']).toContain('attachment');
       expect(response.headers['content-disposition']).toContain('audit-trail-export');
-      
+
       const csvContent = response.text;
       expect(csvContent).toContain('timestamp,action,entityType,entityId,userId');
       expect(csvContent).toContain('CREATE');
@@ -500,7 +498,7 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
 
       expect(response.headers['content-type']).toBe('application/json; charset=utf-8');
       expect(response.headers['content-disposition']).toContain('audit-trail-export.json');
-      
+
       const jsonData = response.body;
       expect(jsonData).toHaveProperty('metadata');
       expect(jsonData).toHaveProperty('entries');
@@ -510,16 +508,16 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
     it('should apply filters to export', async () => {
       const response = await request(app)
         .get('/api/audit-trail/export')
-        .query({ 
+        .query({
           format: 'csv',
           action: 'CREATE',
-          entityType: 'Asset'
+          entityType: 'Asset',
         })
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
 
       const csvContent = response.text;
-      const lines = csvContent.split('\n').filter(line => line.trim());
+      const lines = csvContent.split('\n').filter((line) => line.trim());
       expect(lines).toHaveLength(2); // Header + 1 filtered row
     });
 
@@ -563,9 +561,9 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
             entityId: testAsset.id,
             userId: testUser.id,
             organizationId: testOrganization.id,
-            changes: { 
+            changes: {
               old: { status: 'OPERATIONAL' },
-              new: { status: 'MAINTENANCE' }
+              new: { status: 'MAINTENANCE' },
             },
             checksum: 'valid-checksum-2',
             timestamp: new Date('2024-01-15T11:00:00Z'),
@@ -695,9 +693,9 @@ conditionalDescribe('Audit Trail API Integration Tests', () => {
     it('should handle malformed date ranges gracefully', async () => {
       await request(app)
         .get('/api/audit-trail')
-        .query({ 
+        .query({
           startDate: 'invalid-date',
-          endDate: 'also-invalid'
+          endDate: 'also-invalid',
         })
         .set('Authorization', `Bearer ${authToken}`)
         .expect(400);

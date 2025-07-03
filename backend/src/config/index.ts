@@ -280,7 +280,8 @@ export const config = {
   },
 
   // Shorthand properties for easier access
-  databaseUrl: env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/dumbassets_enhanced',
+  databaseUrl:
+    env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/dumbassets_enhanced',
   useEmbeddedDb: env.USE_EMBEDDED_DB,
   uploadDir: path.resolve(env.UPLOAD_DIR),
   fileStorageType: env.FILE_STORAGE_TYPE,

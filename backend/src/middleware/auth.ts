@@ -11,6 +11,23 @@ import {
 } from '../lib/permissions';
 import type { IRequestContext } from '../interfaces/context.interface';
 
+// Augment Express Request interface to include custom properties
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: {
+      id: string;
+      email: string;
+      role: UserRole;
+      organizationId: string;
+      sessionId?: string;
+      tokenId?: string;
+    };
+    permissionContext?: PermissionContext;
+    context?: IRequestContext;
+    allowedAttributes?: string[]; // Added by requirePermission
+  }
+}
+
 export interface AuthenticatedRequest extends Request {
   user: {
     id: string;
@@ -20,8 +37,6 @@ export interface AuthenticatedRequest extends Request {
     sessionId?: string;
     tokenId?: string;
   };
-  permissionContext?: PermissionContext;
-  context?: IRequestContext;
 }
 
 // Track failed authentication attempts
@@ -421,7 +436,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     }
 
     const authenticatedReq = req as AuthenticatedRequest;
-    
+
     if (authenticatedReq.user) {
       // Set up context for service calls
       authenticatedReq.context = {

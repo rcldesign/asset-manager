@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
 import { addSyncJob } from '../lib/queue';
-import type { SyncQueue, SyncClient } from '@prisma/client';
+import type { SyncQueue, SyncClient, PrismaClient } from '@prisma/client';
 
 export interface ServiceWorkerSyncEvent {
   tag: string;
@@ -23,8 +23,13 @@ export interface BackgroundSyncRegistration {
  * Handles registration, processing, and retry logic for offline sync
  */
 export class ServiceWorkerSyncService {
+  private prisma: PrismaClient;
   private readonly DEFAULT_MIN_INTERVAL = 5 * 60 * 1000; // 5 minutes
   private readonly DEFAULT_MAX_RETRIES = 3;
+
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+  }
 
   /**
    * Register a background sync task
@@ -32,10 +37,10 @@ export class ServiceWorkerSyncService {
   async registerBackgroundSync(
     userId: string,
     deviceId: string,
-    registration: BackgroundSyncRegistration
+    registration: BackgroundSyncRegistration,
   ): Promise<void> {
-    const client = await prisma.syncClient.findFirst({
-      where: { userId, deviceId }
+    const client = await this.prisma.syncClient.findFirst({
+      where: { userId, deviceId },
     });
 
     if (!client) {
@@ -43,23 +48,23 @@ export class ServiceWorkerSyncService {
     }
 
     // Store sync registration metadata
-    await prisma.syncClient.update({
+    await this.prisma.syncClient.update({
       where: { id: client.id },
       data: {
         syncToken: JSON.stringify({
           ...JSON.parse(client.syncToken || '{}'),
           backgroundSync: {
             ...registration,
-            registeredAt: new Date().toISOString()
-          }
-        })
-      }
+            registeredAt: new Date().toISOString(),
+          },
+        }),
+      },
     });
 
     logger.info('Background sync registered', {
       userId,
       deviceId,
-      tag: registration.tag
+      tag: registration.tag,
     });
   }
 
@@ -72,7 +77,7 @@ export class ServiceWorkerSyncService {
     logger.info('Processing service worker sync event', {
       tag,
       lastChance,
-      clientId
+      clientId,
     });
 
     try {
@@ -89,23 +94,23 @@ export class ServiceWorkerSyncService {
         case 'sync-all':
           await this.processSyncAll(clientId, pendingItems);
           break;
-        
+
         case 'sync-critical':
           await this.processCriticalSync(clientId, pendingItems);
           break;
-        
+
         case 'sync-assets':
           await this.processSyncByType(clientId, pendingItems, 'asset');
           break;
-        
+
         case 'sync-tasks':
           await this.processSyncByType(clientId, pendingItems, 'task');
           break;
-        
+
         case 'sync-schedules':
           await this.processSyncByType(clientId, pendingItems, 'schedule');
           break;
-        
+
         default:
           await this.processCustomSync(clientId, tag, pendingItems);
       }
@@ -118,7 +123,7 @@ export class ServiceWorkerSyncService {
       logger.error('Error processing sync event', {
         tag,
         clientId,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
       throw error;
     }
@@ -127,13 +132,10 @@ export class ServiceWorkerSyncService {
   /**
    * Get pending sync items for a client
    */
-  private async getPendingSyncItems(
-    clientId: string,
-    tag?: string
-  ): Promise<SyncQueue[]> {
+  private async getPendingSyncItems(clientId: string, tag?: string): Promise<SyncQueue[]> {
     const whereConditions: any = {
       clientId,
-      status: { in: ['PENDING', 'FAILED'] }
+      status: { in: ['PENDING', 'FAILED'] },
     };
 
     // Filter by tag if provided
@@ -145,40 +147,31 @@ export class ServiceWorkerSyncService {
       }
     }
 
-    return await prisma.syncQueue.findMany({
+    return await this.prisma.syncQueue.findMany({
       where: whereConditions,
-      orderBy: [
-        { retryCount: 'asc' },
-        { createdAt: 'asc' }
-      ],
-      take: 100 // Limit batch size
+      orderBy: [{ retryCount: 'asc' }, { createdAt: 'asc' }],
+      take: 100, // Limit batch size
     });
   }
 
   /**
    * Process all pending sync items
    */
-  private async processSyncAll(
-    clientId: string,
-    items: SyncQueue[]
-  ): Promise<void> {
+  private async processSyncAll(clientId: string, items: SyncQueue[]): Promise<void> {
     // Queue sync job for batch processing
     await addSyncJob({
       type: 'batch-sync',
       clientId,
-      itemIds: items.map(item => item.id)
+      itemIds: items.map((item) => item.id),
     });
   }
 
   /**
    * Process critical sync items (high priority)
    */
-  private async processCriticalSync(
-    clientId: string,
-    items: SyncQueue[]
-  ): Promise<void> {
+  private async processCriticalSync(clientId: string, items: SyncQueue[]): Promise<void> {
     // Filter critical items (e.g., status updates, assignments)
-    const criticalItems = items.filter(item => {
+    const criticalItems = items.filter((item) => {
       const payload = item.payload as any;
       return (
         item.operation === 'UPDATE' &&
@@ -190,8 +183,8 @@ export class ServiceWorkerSyncService {
       await addSyncJob({
         type: 'critical-sync',
         clientId,
-        itemIds: criticalItems.map(item => item.id),
-        priority: 10 // High priority
+        itemIds: criticalItems.map((item) => item.id),
+        priority: 10, // High priority
       });
     }
   }
@@ -202,16 +195,16 @@ export class ServiceWorkerSyncService {
   private async processSyncByType(
     clientId: string,
     items: SyncQueue[],
-    entityType: string
+    entityType: string,
   ): Promise<void> {
-    const filteredItems = items.filter(item => item.entityType === entityType);
+    const filteredItems = items.filter((item) => item.entityType === entityType);
 
     if (filteredItems.length > 0) {
       await addSyncJob({
         type: 'type-sync',
         clientId,
         entityType,
-        itemIds: filteredItems.map(item => item.id)
+        itemIds: filteredItems.map((item) => item.id),
       });
     }
   }
@@ -222,7 +215,7 @@ export class ServiceWorkerSyncService {
   private async processCustomSync(
     clientId: string,
     tag: string,
-    items: SyncQueue[]
+    items: SyncQueue[],
   ): Promise<void> {
     // Handle custom sync tags
     logger.info('Processing custom sync', { clientId, tag, itemCount: items.length });
@@ -231,7 +224,7 @@ export class ServiceWorkerSyncService {
       type: 'custom-sync',
       clientId,
       tag,
-      itemIds: items.map(item => item.id)
+      itemIds: items.map((item) => item.id),
     });
   }
 
@@ -241,28 +234,26 @@ export class ServiceWorkerSyncService {
   private async handleLastChanceSync(
     clientId: string,
     tag: string,
-    items: SyncQueue[]
+    items: SyncQueue[],
   ): Promise<void> {
     logger.warn('Last chance sync triggered', {
       clientId,
       tag,
-      pendingItems: items.length
+      pendingItems: items.length,
     });
 
     // Mark items that exceed retry limit
-    const failedItems = items.filter(item => 
-      item.retryCount >= this.DEFAULT_MAX_RETRIES
-    );
+    const failedItems = items.filter((item) => item.retryCount >= this.DEFAULT_MAX_RETRIES);
 
     if (failedItems.length > 0) {
-      await prisma.syncQueue.updateMany({
+      await this.prisma.syncQueue.updateMany({
         where: {
-          id: { in: failedItems.map(item => item.id) }
+          id: { in: failedItems.map((item) => item.id) },
         },
         data: {
           status: 'FAILED',
-          errorMessage: 'Max retries exceeded - sync abandoned'
-        }
+          errorMessage: 'Max retries exceeded - sync abandoned',
+        },
       });
 
       // Notify user about failed syncs
@@ -273,19 +264,16 @@ export class ServiceWorkerSyncService {
   /**
    * Notify user about failed sync items
    */
-  private async notifyFailedSync(
-    clientId: string,
-    failedItems: SyncQueue[]
-  ): Promise<void> {
-    const client = await prisma.syncClient.findUnique({
+  private async notifyFailedSync(clientId: string, failedItems: SyncQueue[]): Promise<void> {
+    const client = await this.prisma.syncClient.findUnique({
       where: { id: clientId },
-      include: { user: true }
+      include: { user: true },
     });
 
     if (!client) return;
 
     // Create notification for failed syncs
-    await prisma.notification.create({
+    await this.prisma.notification.create({
       data: {
         userId: client.userId,
         organizationId: client.user.organizationId,
@@ -295,9 +283,9 @@ export class ServiceWorkerSyncService {
         metadata: {
           clientId,
           failedCount: failedItems.length,
-          entityTypes: [...new Set(failedItems.map(item => item.entityType))]
-        }
-      }
+          entityTypes: [...new Set(failedItems.map((item) => item.entityType))],
+        },
+      },
     });
   }
 
@@ -311,19 +299,19 @@ export class ServiceWorkerSyncService {
     byEntityType: Record<string, number>;
     oldestPending?: Date;
   }> {
-    const stats = await prisma.syncQueue.groupBy({
+    const stats = await this.prisma.syncQueue.groupBy({
       by: ['status', 'entityType'],
       where: { clientId },
-      _count: true
+      _count: true,
     });
 
-    const oldestPending = await prisma.syncQueue.findFirst({
+    const oldestPending = await this.prisma.syncQueue.findFirst({
       where: {
         clientId,
-        status: 'PENDING'
+        status: 'PENDING',
       },
       orderBy: { createdAt: 'asc' },
-      select: { createdAt: true }
+      select: { createdAt: true },
     });
 
     const result = {
@@ -331,12 +319,12 @@ export class ServiceWorkerSyncService {
       failed: 0,
       completed: 0,
       byEntityType: {} as Record<string, number>,
-      oldestPending: oldestPending?.createdAt
+      oldestPending: oldestPending?.createdAt,
     };
 
-    stats.forEach(stat => {
+    stats.forEach((stat) => {
       const count = stat._count;
-      
+
       switch (stat.status) {
         case 'PENDING':
           result.pending += count;
@@ -350,8 +338,7 @@ export class ServiceWorkerSyncService {
       }
 
       if (stat.status === 'PENDING') {
-        result.byEntityType[stat.entityType] = 
-          (result.byEntityType[stat.entityType] || 0) + count;
+        result.byEntityType[stat.entityType] = (result.byEntityType[stat.entityType] || 0) + count;
       }
     });
 
@@ -365,18 +352,18 @@ export class ServiceWorkerSyncService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
-    const result = await prisma.syncQueue.deleteMany({
+    const result = await this.prisma.syncQueue.deleteMany({
       where: {
         status: 'COMPLETED',
         processedAt: {
-          lt: cutoffDate
-        }
-      }
+          lt: cutoffDate,
+        },
+      },
     });
 
     logger.info('Cleaned up sync queue', {
       deletedCount: result.count,
-      cutoffDate
+      cutoffDate,
     });
 
     return result.count;
@@ -388,12 +375,12 @@ export class ServiceWorkerSyncService {
   async retryFailedItems(clientId: string, maxRetries?: number): Promise<number> {
     const retryLimit = maxRetries || this.DEFAULT_MAX_RETRIES;
 
-    const failedItems = await prisma.syncQueue.findMany({
+    const failedItems = await this.prisma.syncQueue.findMany({
       where: {
         clientId,
         status: 'FAILED',
-        retryCount: { lt: retryLimit }
-      }
+        retryCount: { lt: retryLimit },
+      },
     });
 
     if (failedItems.length === 0) {
@@ -401,20 +388,20 @@ export class ServiceWorkerSyncService {
     }
 
     // Reset status to pending for retry
-    await prisma.syncQueue.updateMany({
+    await this.prisma.syncQueue.updateMany({
       where: {
-        id: { in: failedItems.map(item => item.id) }
+        id: { in: failedItems.map((item) => item.id) },
       },
       data: {
-        status: 'PENDING'
-      }
+        status: 'PENDING',
+      },
     });
 
     // Queue for processing
     await addSyncJob({
       type: 'retry-sync',
       clientId,
-      itemIds: failedItems.map(item => item.id)
+      itemIds: failedItems.map((item) => item.id),
     });
 
     return failedItems.length;
@@ -431,50 +418,48 @@ export class ServiceWorkerSyncService {
     recommendations: string[];
   }> {
     // Get all clients for organization
-    const clients = await prisma.syncClient.findMany({
+    const clients = await this.prisma.syncClient.findMany({
       where: {
         user: { organizationId },
-        isActive: true
+        isActive: true,
       },
       include: {
         _count: {
           select: {
             syncQueues: {
               where: {
-                status: { in: ['PENDING', 'FAILED'] }
-              }
-            }
-          }
-        }
-      }
+                status: { in: ['PENDING', 'FAILED'] },
+              },
+            },
+          },
+        },
+      },
     });
 
     // Calculate metrics
     const activeClients = clients.length;
-    const totalBacklog = clients.reduce((sum, client) => 
-      sum + client._count.syncQueues, 0
-    );
+    const totalBacklog = clients.reduce((sum, client) => sum + client._count.syncQueues, 0);
 
     // Get failure rate
-    const [totalItems, failedItems] = await prisma.$transaction([
-      prisma.syncQueue.count({
+    const [totalItems, failedItems] = await this.prisma.$transaction([
+      this.prisma.syncQueue.count({
         where: {
           client: {
-            user: { organizationId }
-          }
-        }
-      }),
-      prisma.syncQueue.count({
-        where: {
-          client: {
-            user: { organizationId }
+            user: { organizationId },
           },
-          status: 'FAILED'
-        }
-      })
+        },
+      }),
+      this.prisma.syncQueue.count({
+        where: {
+          client: {
+            user: { organizationId },
+          },
+          status: 'FAILED',
+        },
+      }),
     ]);
 
-    const failureRate = totalItems > 0 ? (failedItems / totalItems) : 0;
+    const failureRate = totalItems > 0 ? failedItems / totalItems : 0;
 
     // Calculate health score (0-100)
     let healthScore = 100;
@@ -489,7 +474,9 @@ export class ServiceWorkerSyncService {
       recommendations.push('High sync backlog detected. Consider increasing sync frequency.');
     }
     if (failureRate > 0.1) {
-      recommendations.push('High failure rate. Check network connectivity and conflict resolution.');
+      recommendations.push(
+        'High failure rate. Check network connectivity and conflict resolution.',
+      );
     }
     if (activeClients === 0) {
       recommendations.push('No active sync clients. Ensure PWA is properly configured.');
@@ -500,7 +487,7 @@ export class ServiceWorkerSyncService {
       activeClients,
       syncBacklog: totalBacklog,
       failureRate,
-      recommendations
+      recommendations,
     };
   }
 }

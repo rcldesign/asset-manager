@@ -1,4 +1,4 @@
-import type { Asset, AssetCategory, AssetStatus } from '@prisma/client';
+import type { Asset, AssetCategory, AssetStatus, PrismaClient } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../lib/prisma';
@@ -9,11 +9,11 @@ import { ActivityStreamService } from './activity-stream.service';
 import { ActivityVerbs, ActivityObjectTypes, ActivityTargetTypes } from '../types/activity';
 import { webhookService } from './webhook.service';
 import { AuditService } from './audit.service';
-import { IRequestContext } from '../interfaces/context.interface';
-import type { 
-  AssetCreatedPayload, 
-  AssetUpdatedPayload, 
-  AssetDeletedPayload 
+import type { IRequestContext } from '../interfaces/context.interface';
+import type {
+  AssetCreatedPayload,
+  AssetUpdatedPayload,
+  // AssetDeletedPayload,
 } from '../types/webhook-payloads';
 
 export interface CreateAssetData {
@@ -125,6 +125,7 @@ export interface AssetWithRelations extends Asset {
  * @class AssetService
  */
 export class AssetService {
+  private prisma: PrismaClient;
   private assetTemplateService: AssetTemplateService;
   private locationService: LocationService;
   private activityStreamService: ActivityStreamService;
@@ -134,10 +135,11 @@ export class AssetService {
    * Creates an instance of AssetService.
    * Initializes dependencies for asset template, location, and audit services.
    */
-  constructor() {
-    this.assetTemplateService = new AssetTemplateService();
-    this.locationService = new LocationService();
-    this.activityStreamService = new ActivityStreamService(prisma);
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+    this.assetTemplateService = new AssetTemplateService(prismaClient);
+    this.locationService = new LocationService(prismaClient);
+    this.activityStreamService = new ActivityStreamService(prismaClient);
     this.auditService = new AuditService();
   }
 
@@ -210,7 +212,7 @@ export class AssetService {
     } = data;
 
     // Verify organization exists
-    const organization = await prisma.organization.findUnique({
+    const organization = await this.prisma.organization.findUnique({
       where: { id: organizationId },
     });
 
@@ -283,7 +285,7 @@ export class AssetService {
     // Check for QR code uniqueness
     const generatedQrCode = this.generateQrCode(assetId, qrCode);
     if (generatedQrCode) {
-      const existingAsset = await prisma.asset.findFirst({
+      const existingAsset = await this.prisma.asset.findFirst({
         where: { qrCode: generatedQrCode },
       });
       if (existingAsset) {
@@ -292,7 +294,7 @@ export class AssetService {
     }
 
     // Create asset within a transaction for audit logging
-    const asset = await prisma.$transaction(async (tx) => {
+    const asset = await this.prisma.$transaction(async (tx) => {
       const newAsset = await tx.asset.create({
         data: {
           id: assetId,
@@ -385,27 +387,31 @@ export class AssetService {
             qrCode: asset.qrCode || undefined,
             serialNumber: asset.serialNumber || undefined,
             locationId: asset.locationId || undefined,
-            locationName: location?.name,
+            locationName: asset.location?.name,
             assetTemplateId: asset.assetTemplateId || undefined,
-            assetTemplateName: template?.name
+            assetTemplateName: asset.assetTemplate?.name,
           },
-          location: location ? {
-            id: location.id,
-            name: location.name,
-            path: location.path
-          } : undefined,
-          parentAsset: parentAsset ? {
-            id: parentAsset.id,
-            name: parentAsset.name
-          } : undefined,
-          customFields: asset.customFields as Record<string, any> || undefined
+          location: asset.location
+            ? {
+                id: asset.location.id,
+                name: asset.location.name,
+                path: asset.location.path,
+              }
+            : undefined,
+          parentAsset: asset.parent
+            ? {
+                id: asset.parent.id,
+                name: asset.parent.name,
+              }
+            : undefined,
+          customFields: (asset.customFields as Record<string, any>) || undefined,
         };
 
         const enhancedEvent = await webhookService.createEnhancedEvent(
           'asset.created',
           data.organizationId,
           createdBy.id,
-          payload
+          payload,
         );
 
         await webhookService.emitEvent(enhancedEvent);
@@ -422,16 +428,16 @@ export class AssetService {
             category: asset.category,
             status: asset.status,
             locationId: asset.locationId,
-            locationName: location?.name,
+            locationName: asset.location?.name,
             templateId: asset.assetTemplateId,
-            templateName: template?.name,
+            templateName: asset.assetTemplate?.name,
             parentId: asset.parentId,
-            parentName: parentAsset?.name,
+            parentName: asset.parent?.name,
             qrCode: asset.qrCode,
             serialNumber: asset.serialNumber,
             manufacturer: asset.manufacturer,
             modelNumber: asset.modelNumber,
-            customFields: asset.customFields
+            customFields: asset.customFields,
           },
           metadata: {
             source: 'asset-service',
@@ -468,7 +474,7 @@ export class AssetService {
       where.organizationId = organizationId;
     }
 
-    return prisma.asset.findFirst({
+    return this.prisma.asset.findFirst({
       where,
       include: {
         location: true,
@@ -519,9 +525,9 @@ export class AssetService {
     // Store data for webhook emission after transaction
     let assetBeforeState: AssetWithRelations | null = null;
     let assetAfterState: AssetWithRelations | null = null;
-    
+
     // Implement the fetch-update-log pattern within a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // Step 1: FETCH - Get existing asset (inside transaction for consistency)
       const assetBefore = await tx.asset.findFirst({
         where: { id, organizationId },
@@ -535,11 +541,11 @@ export class AssetService {
           },
         },
       });
-      
+
       if (!assetBefore) {
         throw new NotFoundError('Asset');
       }
-      
+
       // Store for webhook emission
       assetBeforeState = assetBefore as AssetWithRelations;
 
@@ -625,7 +631,12 @@ export class AssetService {
 
         // If path changes, update all descendants using transaction client
         if (newPath !== assetBefore.path) {
-          await this.updateDescendantPathsInTransaction(tx, assetBefore.id, assetBefore.path, newPath);
+          await this.updateDescendantPathsInTransaction(
+            tx,
+            assetBefore.id,
+            assetBefore.path,
+            newPath,
+          );
         }
       }
 
@@ -733,7 +744,7 @@ export class AssetService {
           path: updatedAsset.path,
         },
       });
-      
+
       // Store for webhook emission
       assetAfterState = updatedAsset as AssetWithRelations;
 
@@ -743,77 +754,92 @@ export class AssetService {
     // Emit webhook event after successful transaction
     if (assetBeforeState && assetAfterState) {
       try {
+        // Type narrow the states for better type inference
+        const beforeState = assetBeforeState as AssetWithRelations;
+        const afterState = assetAfterState as AssetWithRelations;
+        
         // Prepare changes array
         const changes: Array<{ field: string; oldValue: any; newValue: any }> = [];
-        
+
         // Compare and track changes
-        if (data.name !== undefined && data.name !== assetBeforeState.name) {
-          changes.push({ field: 'name', oldValue: assetBeforeState.name, newValue: data.name });
+        if (data.name !== undefined && data.name !== beforeState.name) {
+          changes.push({ field: 'name', oldValue: beforeState.name, newValue: data.name });
         }
-        if (data.status !== undefined && data.status !== assetBeforeState.status) {
-          changes.push({ field: 'status', oldValue: assetBeforeState.status, newValue: data.status });
-        }
-        if (data.locationId !== undefined && data.locationId !== assetBeforeState.locationId) {
-          changes.push({ 
-            field: 'location', 
-            oldValue: assetBeforeState.location?.name || null, 
-            newValue: assetAfterState.location?.name || null 
+        if (data.status !== undefined && data.status !== beforeState.status) {
+          changes.push({
+            field: 'status',
+            oldValue: beforeState.status,
+            newValue: data.status,
           });
         }
-        if (data.parentId !== undefined && data.parentId !== assetBeforeState.parentId) {
-          changes.push({ 
-            field: 'parent', 
-            oldValue: assetBeforeState.parent?.name || null, 
-            newValue: assetAfterState.parent?.name || null 
+        if (data.locationId !== undefined && data.locationId !== beforeState.locationId) {
+          changes.push({
+            field: 'location',
+            oldValue: beforeState.location?.name || null,
+            newValue: afterState.location?.name || null,
           });
         }
-        if (data.assetTemplateId !== undefined && data.assetTemplateId !== assetBeforeState.assetTemplateId) {
-          changes.push({ 
-            field: 'template', 
-            oldValue: assetBeforeState.assetTemplate?.name || null, 
-            newValue: assetAfterState.assetTemplate?.name || null 
+        if (data.parentId !== undefined && data.parentId !== beforeState.parentId) {
+          changes.push({
+            field: 'parent',
+            oldValue: beforeState.parent?.name || null,
+            newValue: afterState.parent?.name || null,
+          });
+        }
+        if (
+          data.assetTemplateId !== undefined &&
+          data.assetTemplateId !== beforeState.assetTemplateId
+        ) {
+          changes.push({
+            field: 'template',
+            oldValue: beforeState.assetTemplate?.name || null,
+            newValue: afterState.assetTemplate?.name || null,
           });
         }
         if (data.customFields !== undefined) {
-          changes.push({ 
-            field: 'customFields', 
-            oldValue: assetBeforeState.customFields, 
-            newValue: assetAfterState.customFields 
+          changes.push({
+            field: 'customFields',
+            oldValue: beforeState.customFields,
+            newValue: afterState.customFields,
           });
         }
 
         // Create enhanced webhook event
         const payload: AssetUpdatedPayload = {
           asset: {
-            id: assetAfterState.id,
-            name: assetAfterState.name,
-            category: assetAfterState.category,
-            status: assetAfterState.status,
-            qrCode: assetAfterState.qrCode || undefined,
-            serialNumber: assetAfterState.serialNumber || undefined,
-            locationId: assetAfterState.locationId || undefined,
-            locationName: assetAfterState.location?.name,
-            assetTemplateId: assetAfterState.assetTemplateId || undefined,
-            assetTemplateName: assetAfterState.assetTemplate?.name
+            id: afterState.id,
+            name: afterState.name,
+            category: afterState.category,
+            status: afterState.status,
+            qrCode: afterState.qrCode || undefined,
+            serialNumber: afterState.serialNumber || undefined,
+            locationId: afterState.locationId || undefined,
+            locationName: afterState.location?.name,
+            assetTemplateId: afterState.assetTemplateId || undefined,
+            assetTemplateName: afterState.assetTemplate?.name,
           },
           changes,
-          location: assetAfterState.location ? {
-            id: assetAfterState.location.id,
-            name: assetAfterState.location.name,
-            path: assetAfterState.location.path
-          } : undefined,
-          previousLocation: assetBeforeState.location ? {
-            id: assetBeforeState.location.id,
-            name: assetBeforeState.location.name,
-            path: assetBeforeState.location.path
-          } : undefined
+          location: afterState.location
+            ? {
+                id: afterState.location.id,
+                name: afterState.location.name,
+                path: afterState.location.path,
+              }
+            : undefined,
+          previousLocation: beforeState.location
+            ? {
+                id: beforeState.location.id,
+                name: beforeState.location.name,
+                path: beforeState.location.path,
+              }
+            : undefined,
         };
 
         const enhancedEvent = await webhookService.createEnhancedEvent(
           'asset.updated',
           organizationId,
           context.userId,
-          payload
+          payload,
         );
 
         await webhookService.emitEvent(enhancedEvent);
@@ -837,13 +863,14 @@ export class AssetService {
    * @returns {Promise<void>}
    * @private
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
+  /*
   private async updateDescendantPaths(
     assetId: string,
     oldPath: string,
     newPath: string,
   ): Promise<void> {
-    await prisma.$executeRawUnsafe(
+    await this.prisma.$executeRawUnsafe(
       `
       UPDATE assets
       SET path = REPLACE(path, $1, $2)
@@ -855,6 +882,7 @@ export class AssetService {
       assetId,
     );
   }
+  */
 
   /**
    * Update descendant paths within a transaction.
@@ -897,7 +925,12 @@ export class AssetService {
    * // Delete asset and all its children
    * await assetService.deleteAsset('asset-123', 'org-456', true);
    */
-  async deleteAsset(context: IRequestContext, id: string, organizationId: string, cascade = false): Promise<void> {
+  async deleteAsset(
+    context: IRequestContext,
+    id: string,
+    organizationId: string,
+    cascade = false,
+  ): Promise<void> {
     const asset = await this.getAssetById(id, organizationId);
     if (!asset) {
       throw new NotFoundError('Asset');
@@ -914,7 +947,7 @@ export class AssetService {
 
     // Check for active tasks
     if (asset._count?.tasks && asset._count.tasks > 0) {
-      const activeTasks = await prisma.task.count({
+      const activeTasks = await this.prisma.task.count({
         where: {
           assetId: id,
           status: { in: ['PLANNED', 'IN_PROGRESS'] },
@@ -927,7 +960,7 @@ export class AssetService {
     }
 
     // Delete asset within a transaction for audit logging
-    await prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       // Add audit log before deletion
       await this.auditService.log(tx, {
         context,
@@ -962,10 +995,10 @@ export class AssetService {
           serialNumber: asset.serialNumber,
           manufacturer: asset.manufacturer,
           modelNumber: asset.modelNumber,
-          childAssets: asset.children.map(child => ({
+          childAssets: asset.children?.map((child) => ({
             id: child.id,
-            name: child.name
-          }))
+            name: child.name,
+          })) || [],
         },
         metadata: {
           source: 'asset-service',
@@ -1114,15 +1147,15 @@ export class AssetService {
     const where: Prisma.AssetWhereInput = { AND: whereConditions };
 
     // Execute query
-    const [assets, total] = await prisma.$transaction([
-      prisma.asset.findMany({
+    const [assets, total] = await this.prisma.$transaction([
+      this.prisma.asset.findMany({
         where,
         skip,
         take: limit,
         orderBy: { [sortBy]: sortOrder },
         include: includeChildren ? { children: true } : undefined,
       }),
-      prisma.asset.count({ where }),
+      this.prisma.asset.count({ where }),
     ]);
 
     return {
@@ -1161,7 +1194,7 @@ export class AssetService {
       if (!root) {
         throw new NotFoundError('Root asset');
       }
-      assets = await prisma.asset.findMany({
+      assets = await this.prisma.asset.findMany({
         where: {
           organizationId,
           path: { startsWith: root.path },
@@ -1181,7 +1214,7 @@ export class AssetService {
       });
     } else {
       // Get all assets for the organization to build the complete tree
-      assets = await prisma.asset.findMany({
+      assets = await this.prisma.asset.findMany({
         where: { organizationId },
         orderBy: [{ path: 'asc' }, { name: 'asc' }],
         include: {
@@ -1255,7 +1288,7 @@ export class AssetService {
    * console.log(`Found ${assets.length} assets at this location`);
    */
   async getAssetsByLocation(locationId: string, organizationId: string): Promise<Asset[]> {
-    return prisma.asset.findMany({
+    return this.prisma.asset.findMany({
       where: {
         locationId,
         organizationId,
@@ -1276,7 +1309,7 @@ export class AssetService {
    * console.log(`Found ${assets.length} assets using this template`);
    */
   async getAssetsByTemplate(templateId: string, organizationId: string): Promise<Asset[]> {
-    return prisma.asset.findMany({
+    return this.prisma.asset.findMany({
       where: {
         assetTemplateId: templateId,
         organizationId,
@@ -1328,7 +1361,7 @@ export class AssetService {
       throw new ConflictError(`Invalid status transition from ${asset.status} to ${status}`);
     }
 
-    return prisma.asset.update({
+    return this.prisma.asset.update({
       where: { id },
       data: { status },
     });
@@ -1353,7 +1386,7 @@ export class AssetService {
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + daysBefore);
 
-    return prisma.asset.findMany({
+    return this.prisma.asset.findMany({
       where: {
         organizationId,
         warrantyLifetime: false,
@@ -1407,24 +1440,24 @@ export class AssetService {
     const [total, byCategory, byStatus, byLocation, warrantyExpiring, totalValue] =
       await Promise.all([
         // Total count
-        prisma.asset.count({ where: { organizationId } }),
+        this.prisma.asset.count({ where: { organizationId } }),
 
         // Count by category
-        prisma.asset.groupBy({
+        this.prisma.asset.groupBy({
           by: ['category'],
           where: { organizationId },
           _count: true,
         }),
 
         // Count by status
-        prisma.asset.groupBy({
+        this.prisma.asset.groupBy({
           by: ['status'],
           where: { organizationId },
           _count: true,
         }),
 
         // Count by location
-        prisma.asset.groupBy({
+        this.prisma.asset.groupBy({
           by: ['locationId'],
           where: { organizationId, locationId: { not: null } },
           _count: true,
@@ -1434,7 +1467,7 @@ export class AssetService {
         this.getWarrantyExpiringAssets(organizationId, 30),
 
         // Total value
-        prisma.asset.aggregate({
+        this.prisma.asset.aggregate({
           where: { organizationId },
           _sum: { purchasePrice: true },
         }),
@@ -1442,7 +1475,7 @@ export class AssetService {
 
     // Get location names
     const locationIds = byLocation.map((l) => l.locationId).filter(Boolean) as string[];
-    const locations = await prisma.location.findMany({
+    const locations = await this.prisma.location.findMany({
       where: { id: { in: locationIds } },
       select: { id: true, name: true },
     });

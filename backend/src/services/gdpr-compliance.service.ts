@@ -1,12 +1,15 @@
 import { prisma } from '../lib/prisma';
 import { AppError, NotFoundError, ForbiddenError } from '../utils/errors';
-import { IRequestContext } from '../interfaces/context.interface';
-import { TransactionPrismaClient } from '../types/prisma.types';
+import type { IRequestContext } from '../interfaces/context.interface';
+import type { TransactionPrismaClient } from '../types/prisma.types';
 import { AuditService } from './audit.service';
-import { ActionType } from '@prisma/client';
+import { ActionType, PrismaClient } from '@prisma/client';
 import { dataExportService } from './data-export.service';
 import { webhookService } from './webhook.service';
-import type { GDPRExportRequestedPayload, GDPRDeletionRequestedPayload } from '../types/webhook-payloads';
+import type {
+  GDPRExportRequestedPayload,
+  GDPRDeletionRequestedPayload,
+} from '../types/webhook-payloads';
 import * as crypto from 'crypto';
 
 export interface GDPRRequest {
@@ -50,10 +53,12 @@ export interface AnonymizationConfig {
  * deletion, and anonymization with proper audit trails.
  */
 export class GDPRComplianceService {
+  private prisma: PrismaClient;
   private auditService: AuditService;
   private pendingRequests: Map<string, GDPRRequest> = new Map();
 
-  constructor() {
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
     this.auditService = new AuditService();
   }
 
@@ -69,10 +74,10 @@ export class GDPRComplianceService {
    */
   async initiateRequest(
     context: IRequestContext,
-    request: GDPRRequest
+    request: GDPRRequest,
   ): Promise<{ requestId: string; verificationRequired: boolean }> {
     // Verify the user exists and belongs to the organization
-    const user = await prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: {
         id: request.userId,
         organizationId: context.organizationId,
@@ -84,7 +89,11 @@ export class GDPRComplianceService {
     }
 
     // Check permissions - only the user themselves or an admin can make requests
-    if (context.userId !== request.userId && context.userRole !== 'OWNER' && context.userRole !== 'MANAGER') {
+    if (
+      context.userId !== request.userId &&
+      context.userRole !== 'OWNER' &&
+      context.userRole !== 'MANAGER'
+    ) {
       throw new ForbiddenError('You can only request GDPR actions for your own account');
     }
 
@@ -126,17 +135,19 @@ export class GDPRComplianceService {
   async processRequest(
     context: IRequestContext,
     requestId: string,
-    verificationToken?: string
+    verificationToken?: string,
   ): Promise<GDPRRequestResult> {
     const request = this.pendingRequests.get(requestId);
-    
+
     if (!request) {
       throw new NotFoundError('GDPR request');
     }
 
     // For delete/anonymize, verify the token
-    if ((request.type === 'delete' || request.type === 'anonymize') && 
-        request.verificationToken !== verificationToken) {
+    if (
+      (request.type === 'delete' || request.type === 'anonymize') &&
+      request.verificationToken !== verificationToken
+    ) {
       throw new ForbiddenError('Invalid verification token');
     }
 
@@ -185,7 +196,7 @@ export class GDPRComplianceService {
    */
   private async processExportRequest(
     context: IRequestContext,
-    request: GDPRRequest
+    request: GDPRRequest,
   ): Promise<GDPRRequestResult> {
     const exportResult = await dataExportService.exportUserData(context, request.userId);
 
@@ -208,29 +219,22 @@ export class GDPRComplianceService {
           id: crypto.randomBytes(16).toString('hex'),
           userId: request.userId,
           requestedAt: new Date(),
-          status: 'completed'
+          status: 'completed',
         },
         requestedBy: {
           id: context.userId,
           email: '', // Will be populated by createEnhancedEvent
-          name: '',  // Will be populated by createEnhancedEvent
-          role: context.userRole || 'VIEWER'
+          name: '', // Will be populated by createEnhancedEvent
+          role: context.userRole || 'VIEWER',
         },
-        dataCategories: [
-          'profile',
-          'tasks',
-          'comments',
-          'attachments',
-          'activities',
-          'sessions'
-        ]
+        dataCategories: ['profile', 'tasks', 'comments', 'attachments', 'activities', 'sessions'],
       };
 
       const enhancedEvent = await webhookService.createEnhancedEvent(
         'gdpr.export_requested',
         context.organizationId,
         context.userId,
-        payload
+        payload,
       );
 
       await webhookService.emitEvent(enhancedEvent);
@@ -257,10 +261,10 @@ export class GDPRComplianceService {
    */
   private async processDeleteRequest(
     context: IRequestContext,
-    request: GDPRRequest
+    request: GDPRRequest,
   ): Promise<GDPRRequestResult> {
     // Use a transaction to ensure all data is deleted atomically
-    const deletedData = await prisma.$transaction(async (tx: TransactionPrismaClient) => {
+    const deletedData = await this.prisma.$transaction(async (tx: TransactionPrismaClient) => {
       const counts = {
         taskComments: 0,
         taskAssignments: 0,
@@ -358,27 +362,27 @@ export class GDPRComplianceService {
           userId: request.userId,
           requestedAt: new Date(),
           status: 'completed',
-          scheduledDeletionDate: new Date()
+          scheduledDeletionDate: new Date(),
         },
         requestedBy: {
           id: context.userId,
           email: '', // Will be populated by createEnhancedEvent
-          name: '',  // Will be populated by createEnhancedEvent
-          role: context.userRole || 'VIEWER'
+          name: '', // Will be populated by createEnhancedEvent
+          role: context.userRole || 'VIEWER',
         },
         affectedData: {
           assets: 0, // User deletion doesn't delete assets, just removes associations
           tasks: deletedData.taskAssignments,
           comments: deletedData.taskComments,
-          attachments: deletedData.taskAttachments
-        }
+          attachments: deletedData.taskAttachments,
+        },
       };
 
       const enhancedEvent = await webhookService.createEnhancedEvent(
         'gdpr.deletion_requested',
         context.organizationId,
         context.userId,
-        payload
+        payload,
       );
 
       await webhookService.emitEvent(enhancedEvent);
@@ -404,7 +408,7 @@ export class GDPRComplianceService {
    */
   private async processAnonymizeRequest(
     context: IRequestContext,
-    request: GDPRRequest
+    request: GDPRRequest,
   ): Promise<GDPRRequestResult> {
     const anonymizationConfig: AnonymizationConfig = {
       preserveStructure: true,
@@ -412,11 +416,11 @@ export class GDPRComplianceService {
       deleteFields: ['passwordHash', 'googleCredentials'],
     };
 
-    const result = await prisma.$transaction(async (tx: TransactionPrismaClient) => {
+    const result = await this.prisma.$transaction(async (tx: TransactionPrismaClient) => {
       // Generate anonymous identifiers
       const anonymousId = `anon_${crypto.randomBytes(8).toString('hex')}`;
       const anonymousEmail = `${anonymousId}@anonymized.local`;
-      
+
       // Update user record
       await tx.user.update({
         where: { id: request.userId },
@@ -532,7 +536,7 @@ export class GDPRComplianceService {
   async generateComplianceReport(
     context: IRequestContext,
     startDate: Date,
-    endDate: Date
+    endDate: Date,
   ): Promise<any> {
     // Only admins can generate compliance reports
     if (context.userRole !== 'OWNER' && context.userRole !== 'MANAGER') {
@@ -540,7 +544,7 @@ export class GDPRComplianceService {
     }
 
     // Query audit trails for GDPR-related actions
-    const gdprActions = await prisma.auditTrail.findMany({
+    const gdprActions = await this.prisma.auditTrail.findMany({
       where: {
         createdAt: {
           gte: startDate,
@@ -581,7 +585,7 @@ export class GDPRComplianceService {
     const requestsByUser = new Map<string, number>();
     const requestsByType = new Map<string, number>();
 
-    gdprActions.forEach(action => {
+    gdprActions.forEach((action) => {
       const actionType = action.newValue as any;
       const type = actionType?.type || '';
 
@@ -589,7 +593,7 @@ export class GDPRComplianceService {
         summary.totalRequests++;
         const requestType = actionType?.requestType || 'unknown';
         requestsByType.set(requestType, (requestsByType.get(requestType) || 0) + 1);
-        
+
         if (requestType === 'export') summary.exportRequests++;
         if (requestType === 'delete') summary.deletionRequests++;
         if (requestType === 'anonymize') summary.anonymizationRequests++;

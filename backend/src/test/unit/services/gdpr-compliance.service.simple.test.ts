@@ -6,11 +6,15 @@ jest.mock('../../../lib/prisma');
 jest.mock('../../../services/data-export.service');
 jest.mock('../../../services/audit.service');
 
+import { prisma } from '../../../lib/prisma';
+
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+
 describe('GDPRComplianceService', () => {
   let service: GDPRComplianceService;
 
   beforeEach(() => {
-    service = new GDPRComplianceService();
+    service = new GDPRComplianceService(mockPrisma);
     jest.clearAllMocks();
   });
 
@@ -23,7 +27,7 @@ describe('GDPRComplianceService', () => {
   describe('generateVerificationToken', () => {
     it('should generate a valid verification token', () => {
       const token = service.generateVerificationToken();
-      
+
       expect(token).toMatch(/^[a-f0-9]{64}$/);
       expect(token).toHaveLength(64);
     });
@@ -31,7 +35,7 @@ describe('GDPRComplianceService', () => {
     it('should generate unique tokens', () => {
       const token1 = service.generateVerificationToken();
       const token2 = service.generateVerificationToken();
-      
+
       expect(token1).not.toBe(token2);
     });
   });

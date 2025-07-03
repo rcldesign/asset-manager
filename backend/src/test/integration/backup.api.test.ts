@@ -187,11 +187,9 @@ describe('Backup API Integration Tests', () => {
     });
 
     it('should reject backup creation without authentication', async () => {
-      const response = await request(app)
-        .post('/api/backup/create')
-        .send({
-          type: 'full',
-        });
+      const response = await request(app).post('/api/backup/create').send({
+        type: 'full',
+      });
 
       expect(response.status).toBe(401);
     });
@@ -274,7 +272,7 @@ describe('Backup API Integration Tests', () => {
           type: 'database',
           description: 'Test backup for restore',
         });
-      
+
       backupId = createResponse.body.id;
     });
 
@@ -340,7 +338,7 @@ describe('Backup API Integration Tests', () => {
           type: 'files',
           description: 'Test backup for deletion',
         });
-      
+
       backupId = createResponse.body.id;
     });
 
@@ -359,7 +357,7 @@ describe('Backup API Integration Tests', () => {
       const listResponse = await request(app)
         .get('/api/backup/list')
         .set('Authorization', `Bearer ${ownerToken}`);
-      
+
       const backupExists = listResponse.body.some((b: any) => b.id === backupId);
       expect(backupExists).toBe(false);
     });

@@ -1,8 +1,8 @@
 import { prisma } from '../lib/prisma';
 import { AppError, NotFoundError } from '../utils/errors';
-import { IRequestContext } from '../interfaces/context.interface';
+import type { IRequestContext } from '../interfaces/context.interface';
 import { AuditService } from './audit.service';
-import { ActionType } from '@prisma/client';
+import { ActionType, PrismaClient } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Parser } from 'json2csv';
@@ -42,10 +42,12 @@ export interface UserDataExport {
  * Supports JSON, CSV, and Excel formats with field mapping capabilities.
  */
 export class DataExportService {
+  private prisma: PrismaClient;
   private auditService: AuditService;
   private exportPath: string;
 
-  constructor() {
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
     this.auditService = new AuditService();
     this.exportPath = process.env.EXPORT_PATH || path.join(process.cwd(), 'exports');
   }
@@ -64,10 +66,7 @@ export class DataExportService {
   /**
    * Export assets in the specified format
    */
-  async exportAssets(
-    context: IRequestContext,
-    options: ExportOptions
-  ): Promise<ExportResult> {
+  async exportAssets(context: IRequestContext, options: ExportOptions): Promise<ExportResult> {
     await this.initializeExportDirectory();
 
     // Build query with filters
@@ -80,19 +79,21 @@ export class DataExportService {
     }
 
     // Fetch assets with optional relations
-    const assets = await prisma.asset.findMany({
+    const assets = await this.prisma.asset.findMany({
       where,
-      include: options.includeRelations ? {
-        location: true,
-        assetTemplate: true,
-        components: true,
-        attachments: true,
-        tasks: {
-          include: {
-            assignments: true,
-          },
-        },
-      } : undefined,
+      include: options.includeRelations
+        ? {
+            location: true,
+            assetTemplate: true,
+            components: true,
+            attachments: true,
+            tasks: {
+              include: {
+                assignments: true,
+              },
+            },
+          }
+        : undefined,
     });
 
     // Generate export based on format
@@ -149,10 +150,7 @@ export class DataExportService {
   /**
    * Export tasks in the specified format
    */
-  async exportTasks(
-    context: IRequestContext,
-    options: ExportOptions
-  ): Promise<ExportResult> {
+  async exportTasks(context: IRequestContext, options: ExportOptions): Promise<ExportResult> {
     await this.initializeExportDirectory();
 
     const where: any = {
@@ -163,26 +161,28 @@ export class DataExportService {
       Object.assign(where, options.filters);
     }
 
-    const tasks = await prisma.task.findMany({
+    const tasks = await this.prisma.task.findMany({
       where,
-      include: options.includeRelations ? {
-        asset: true,
-        schedule: true,
-        assignments: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                email: true,
-                fullName: true,
+      include: options.includeRelations
+        ? {
+            asset: true,
+            schedule: true,
+            assignments: {
+              include: {
+                user: {
+                  select: {
+                    id: true,
+                    email: true,
+                    fullName: true,
+                  },
+                },
               },
             },
-          },
-        },
-        comments: true,
-        attachments: true,
-        subtasks: true,
-      } : undefined,
+            comments: true,
+            attachments: true,
+            subtasks: true,
+          }
+        : undefined,
     });
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -237,14 +237,11 @@ export class DataExportService {
   /**
    * Export all data for a specific user (GDPR compliance)
    */
-  async exportUserData(
-    context: IRequestContext,
-    userId: string
-  ): Promise<ExportResult> {
+  async exportUserData(context: IRequestContext, userId: string): Promise<ExportResult> {
     await this.initializeExportDirectory();
 
     // Verify user exists and belongs to the organization
-    const user = await prisma.user.findFirst({
+    const user = await this.prisma.user.findFirst({
       where: {
         id: userId,
         organizationId: context.organizationId,
@@ -258,7 +255,7 @@ export class DataExportService {
     // Collect all user-related data
     const userData: UserDataExport = {
       userData: user,
-      assets: await prisma.asset.findMany({
+      assets: await this.prisma.asset.findMany({
         where: {
           organizationId: context.organizationId,
           OR: [
@@ -266,7 +263,7 @@ export class DataExportService {
           ],
         },
       }),
-      tasks: await prisma.task.findMany({
+      tasks: await this.prisma.task.findMany({
         where: {
           organizationId: context.organizationId,
           assignments: {
@@ -276,25 +273,25 @@ export class DataExportService {
           },
         },
       }),
-      taskAssignments: await prisma.taskAssignment.findMany({
+      taskAssignments: await this.prisma.taskAssignment.findMany({
         where: { userId },
       }),
-      taskComments: await prisma.taskComment.findMany({
+      taskComments: await this.prisma.taskComment.findMany({
         where: { userId },
       }),
-      activities: await prisma.activityStream.findMany({
+      activities: await this.prisma.activityStream.findMany({
         where: { userId },
       }),
-      notifications: await prisma.notification.findMany({
+      notifications: await this.prisma.notification.findMany({
         where: { userId },
       }),
-      sessions: await prisma.session.findMany({
+      sessions: await this.prisma.session.findMany({
         where: { userId },
       }),
-      apiTokens: await prisma.apiToken.findMany({
+      apiTokens: await this.prisma.apiToken.findMany({
         where: { userId },
       }),
-      calendarIntegrations: await prisma.calendarIntegration.findMany({
+      calendarIntegrations: await this.prisma.calendarIntegration.findMany({
         where: { userId },
       }),
       exportedAt: new Date(),
@@ -331,10 +328,7 @@ export class DataExportService {
   /**
    * Export locations in the specified format
    */
-  async exportLocations(
-    context: IRequestContext,
-    options: ExportOptions
-  ): Promise<ExportResult> {
+  async exportLocations(context: IRequestContext, options: ExportOptions): Promise<ExportResult> {
     await this.initializeExportDirectory();
 
     const where: any = {
@@ -345,13 +339,15 @@ export class DataExportService {
       Object.assign(where, options.filters);
     }
 
-    const locations = await prisma.location.findMany({
+    const locations = await this.prisma.location.findMany({
       where,
-      include: options.includeRelations ? {
-        parent: true,
-        children: true,
-        assets: true,
-      } : undefined,
+      include: options.includeRelations
+        ? {
+            parent: true,
+            children: true,
+            assets: true,
+          }
+        : undefined,
     });
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -397,9 +393,9 @@ export class DataExportService {
     let exportData = data;
 
     if (fields && fields.length > 0) {
-      exportData = data.map(item => {
+      exportData = data.map((item) => {
         const filtered: any = {};
-        fields.forEach(field => {
+        fields.forEach((field) => {
           if (field.includes('.')) {
             // Handle nested fields
             const parts = field.split('.');
@@ -429,7 +425,7 @@ export class DataExportService {
     }
 
     // Flatten nested objects for CSV
-    const flattenedData = data.map(item => this.flattenObject(item));
+    const flattenedData = data.map((item) => this.flattenObject(item));
 
     const csvFields = fields || Object.keys(flattenedData[0]);
     const parser = new Parser({ fields: csvFields });
@@ -443,20 +439,20 @@ export class DataExportService {
    */
   private async exportToExcel(data: any[], filePath: string, fields?: string[]): Promise<void> {
     const workbook = XLSX.utils.book_new();
-    
+
     if (data.length === 0) {
       const worksheet = XLSX.utils.aoa_to_sheet([['No data to export']]);
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Export');
     } else {
       // Flatten nested objects for Excel
-      const flattenedData = data.map(item => this.flattenObject(item));
-      
+      const flattenedData = data.map((item) => this.flattenObject(item));
+
       // Filter fields if specified
       let exportData = flattenedData;
       if (fields && fields.length > 0) {
-        exportData = flattenedData.map(item => {
+        exportData = flattenedData.map((item) => {
           const filtered: any = {};
-          fields.forEach(field => {
+          fields.forEach((field) => {
             filtered[field] = item[field];
           });
           return filtered;

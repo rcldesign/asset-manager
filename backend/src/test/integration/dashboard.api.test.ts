@@ -178,9 +178,7 @@ conditionalDescribe('Dashboard API Integration Tests', () => {
     });
 
     it('should require authentication', async () => {
-      await request(app)
-        .get('/api/dashboard/stats')
-        .expect(401);
+      await request(app).get('/api/dashboard/stats').expect(401);
     });
 
     it('should filter by date range when provided', async () => {

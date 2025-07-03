@@ -1,16 +1,31 @@
-import type { AssetWithRelations } from '../../../services/asset.service';
-import { AssetService } from '../../../services/asset.service';
-import type { AssetTemplateService } from '../../../services/asset-template.service';
-import type { LocationService } from '../../../services/location.service';
+import { describe, test, expect, beforeEach, jest } from '@jest/globals';
+import { AssetCategory, AssetStatus, Prisma, UserRole } from '@prisma/client';
 import { AppError, NotFoundError, ConflictError } from '../../../utils/errors';
-import { AssetCategory, AssetStatus, Prisma } from '@prisma/client';
-import { prismaMock } from '../../prisma-singleton';
 import type { IRequestContext } from '../../../interfaces/context.interface';
-import { UserRole } from '../../../lib/permissions';
 
-// Mock the dependencies
+// Enable automatic mocking for Prisma and dependencies
+jest.mock('../../../lib/prisma');
 jest.mock('../../../services/asset-template.service');
 jest.mock('../../../services/location.service');
+jest.mock('../../../services/activity-stream.service');
+jest.mock('../../../services/audit.service');
+
+// Import modules after mocking
+import type { AssetWithRelations } from '../../../services/asset.service';
+import { AssetService } from '../../../services/asset.service';
+import { prisma } from '../../../lib/prisma';
+import type { AssetTemplateService } from '../../../services/asset-template.service';
+import type { LocationService } from '../../../services/location.service';
+
+// Type the mocked modules
+const mockPrisma = prisma as jest.Mocked<typeof prisma>;
+jest.mock('../../../services/webhook.service', () => ({
+  webhookService: {
+    emitEvent: jest.fn().mockResolvedValue(undefined),
+    createEnhancedEvent: jest.fn().mockResolvedValue({ id: 'event-123' }),
+  },
+}));
+
 
 describe('AssetService', () => {
   let assetService: AssetService;
@@ -19,29 +34,71 @@ describe('AssetService', () => {
 
   const mockOrganizationId = 'org-123';
   const mockAssetId = 'asset-123';
-  
+
   const mockContext: IRequestContext = {
     userId: 'user-123',
     userRole: UserRole.MEMBER,
     organizationId: mockOrganizationId,
-    requestId: 'req-123'
+    requestId: 'req-123',
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    
+    // Mock $executeRawUnsafe on the main prisma mock
+    (mockPrisma.$executeRawUnsafe as jest.Mock).mockResolvedValue(undefined);
 
-    // Create service instance
-    assetService = new AssetService();
+    // Create service instance with mock Prisma
+    assetService = new AssetService(mockPrisma);
 
     // Get mocked instances
     mockAssetTemplateService = (assetService as any).assetTemplateService;
     mockLocationService = (assetService as any).locationService;
 
-    // Mock $transaction to handle array of promises
-    (prismaMock.$transaction as jest.Mock).mockImplementation((queries) => {
+    // Mock $transaction to handle both callback and array forms
+    (mockPrisma.$transaction as jest.Mock).mockImplementation((queries) => {
       if (Array.isArray(queries)) {
         // Return mock results for the queries
         return Promise.resolve([[], 0]);
+      }
+      if (typeof queries === 'function') {
+        // For callback-based transactions, pass the mocked prisma client
+        const txMock = {
+          asset: {
+            create: jest.fn(),
+            findFirst: jest.fn(),
+            update: jest.fn(),
+            delete: jest.fn(),
+            findMany: jest.fn(),
+            count: jest.fn(),
+          },
+          auditTrail: {
+            create: jest.fn(),
+          },
+          location: {
+            findFirst: jest.fn(),
+          },
+          organization: {
+            findUnique: jest.fn(),
+          },
+          $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
+        };
+        
+        // Copy over the mock implementations for the transaction context
+        txMock.asset.create.mockImplementation(mockPrisma.asset.create);
+        txMock.asset.findFirst.mockImplementation(mockPrisma.asset.findFirst);
+        txMock.asset.update.mockImplementation(mockPrisma.asset.update);
+        txMock.asset.delete.mockImplementation(mockPrisma.asset.delete);
+        txMock.asset.findMany.mockImplementation(mockPrisma.asset.findMany);
+        txMock.asset.count.mockImplementation(mockPrisma.asset.count);
+        txMock.auditTrail.create.mockResolvedValue({ id: 'audit-123' });
+        txMock.location.findFirst.mockImplementation(mockPrisma.location.findFirst);
+        txMock.organization.findUnique.mockImplementation(mockPrisma.organization.findUnique);
+        
+        // Store the transaction mock for test assertions
+        (assetService as any)._lastTxMock = txMock;
+        
+        return queries(txMock);
       }
       return Promise.resolve([]);
     });
@@ -76,9 +133,9 @@ describe('AssetService', () => {
         updatedAt: new Date(),
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue(mockOrganization as any);
-      prismaMock.asset.findFirst.mockResolvedValue(null); // QR code check
-      prismaMock.asset.create.mockResolvedValue({
+      mockPrisma.organization.findUnique.mockResolvedValue(mockOrganization as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(null); // QR code check
+      mockPrisma.asset.create.mockResolvedValue({
         ...mockAsset,
         location: null,
         assetTemplate: null,
@@ -86,7 +143,7 @@ describe('AssetService', () => {
         _count: { children: 0, tasks: 0, attachments: 0 },
       } as any);
 
-      const result = await assetService.createAsset(createData);
+      const result = await assetService.createAsset(mockContext, createData);
 
       expect(result.name).toBe('Test Asset');
       expect(result.status).toBe(AssetStatus.OPERATIONAL);
@@ -94,7 +151,7 @@ describe('AssetService', () => {
       expect(result.path).toMatch(/^\/[a-zA-Z0-9-]+$/);
       expect(typeof result.qrCode).toBe('string');
       expect(result.qrCode).toMatch(/^AST-[A-Z0-9-]+$/);
-      expect(prismaMock.asset.create).toHaveBeenCalledWith({
+      expect(mockPrisma.asset.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           name: 'Test Asset',
           category: AssetCategory.EQUIPMENT,
@@ -121,14 +178,14 @@ describe('AssetService', () => {
         customFields,
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
       mockAssetTemplateService.getTemplateById.mockResolvedValue(mockTemplate as any);
       mockAssetTemplateService.validateCustomFieldValues.mockResolvedValue({
         valid: true,
         errors: [],
       });
-      prismaMock.asset.findFirst.mockResolvedValue(null);
-      prismaMock.asset.create.mockResolvedValue({
+      mockPrisma.asset.findFirst.mockResolvedValue(null);
+      mockPrisma.asset.create.mockResolvedValue({
         ...createDataWithTemplate,
         id: mockAssetId,
         status: AssetStatus.OPERATIONAL,
@@ -137,7 +194,7 @@ describe('AssetService', () => {
         customFields: { ...mockTemplate.defaultFields, ...customFields },
       } as any);
 
-      const result = await assetService.createAsset(createDataWithTemplate);
+      const result = await assetService.createAsset(mockContext, createDataWithTemplate);
 
       expect(mockAssetTemplateService.getTemplateById).toHaveBeenCalledWith(
         templateId,
@@ -146,6 +203,7 @@ describe('AssetService', () => {
       expect(mockAssetTemplateService.validateCustomFieldValues).toHaveBeenCalledWith(
         templateId,
         customFields,
+        mockOrganizationId,
       );
       expect(result.customFields).toEqual({
         location: 'Warehouse',
@@ -167,10 +225,10 @@ describe('AssetService', () => {
         locationId,
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
       mockLocationService.getLocationById.mockResolvedValue(mockLocation as any);
-      prismaMock.asset.findFirst.mockResolvedValue(null);
-      prismaMock.asset.create.mockResolvedValue({
+      mockPrisma.asset.findFirst.mockResolvedValue(null);
+      mockPrisma.asset.create.mockResolvedValue({
         ...createDataWithLocation,
         id: mockAssetId,
         status: AssetStatus.OPERATIONAL,
@@ -178,9 +236,9 @@ describe('AssetService', () => {
         location: mockLocation,
       } as any);
 
-      const result = await assetService.createAsset(createDataWithLocation);
+      const result = await assetService.createAsset(mockContext, createDataWithLocation);
 
-      expect(mockLocationService.getLocationById).toHaveBeenCalledWith(locationId);
+      expect(mockLocationService.getLocationById).toHaveBeenCalledWith(locationId, mockOrganizationId);
       expect(result.location?.id).toBe(locationId);
     });
 
@@ -197,10 +255,10 @@ describe('AssetService', () => {
         locationId,
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
       mockLocationService.getLocationById.mockResolvedValue(mockLocation as any);
 
-      await expect(assetService.createAsset(createDataWithLocation)).rejects.toThrow(ConflictError);
+      await expect(assetService.createAsset(mockContext, createDataWithLocation)).rejects.toThrow(ConflictError);
     });
 
     it('should create child asset', async () => {
@@ -217,11 +275,11 @@ describe('AssetService', () => {
         parentId,
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
-      prismaMock.asset.findFirst
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
+      mockPrisma.asset.findFirst
         .mockResolvedValueOnce(mockParent as any) // Parent lookup
         .mockResolvedValueOnce(null); // QR code check
-      prismaMock.asset.create.mockResolvedValue({
+      mockPrisma.asset.create.mockResolvedValue({
         ...createDataWithParent,
         id: mockAssetId,
         status: AssetStatus.OPERATIONAL,
@@ -229,16 +287,16 @@ describe('AssetService', () => {
         parent: mockParent,
       } as any);
 
-      const result = await assetService.createAsset(createDataWithParent);
+      const result = await assetService.createAsset(mockContext, createDataWithParent);
 
       expect(result.path).toBe(`/parent-123/${mockAssetId}`);
       expect(result.parent?.id).toBe(parentId);
     });
 
     it('should throw error if organization not found', async () => {
-      prismaMock.organization.findUnique.mockResolvedValue(null);
+      mockPrisma.organization.findUnique.mockResolvedValue(null);
 
-      await expect(assetService.createAsset(createData)).rejects.toThrow(NotFoundError);
+      await expect(assetService.createAsset(mockContext, createData)).rejects.toThrow(NotFoundError);
     });
 
     it('should throw error if template category mismatches', async () => {
@@ -253,10 +311,10 @@ describe('AssetService', () => {
         assetTemplateId: templateId,
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
       mockAssetTemplateService.getTemplateById.mockResolvedValue(mockTemplate as any);
 
-      await expect(assetService.createAsset(createDataWithTemplate)).rejects.toThrow(ConflictError);
+      await expect(assetService.createAsset(mockContext, createDataWithTemplate)).rejects.toThrow(ConflictError);
     });
 
     it('should throw error if custom fields invalid', async () => {
@@ -273,14 +331,14 @@ describe('AssetService', () => {
         customFields: { invalidField: 'value' },
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
       mockAssetTemplateService.getTemplateById.mockResolvedValue(mockTemplate as any);
       mockAssetTemplateService.validateCustomFieldValues.mockResolvedValue({
         valid: false,
         errors: ['Invalid field: invalidField'],
       });
 
-      await expect(assetService.createAsset(createDataWithTemplate)).rejects.toThrow(AppError);
+      await expect(assetService.createAsset(mockContext, createDataWithTemplate)).rejects.toThrow(AppError);
     });
 
     it('should throw error if QR code already exists', async () => {
@@ -290,10 +348,10 @@ describe('AssetService', () => {
         qrCode: customQrCode,
       };
 
-      prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
-      prismaMock.asset.findFirst.mockResolvedValue({ id: 'existing-asset' } as any);
+      mockPrisma.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
+      mockPrisma.asset.findFirst.mockResolvedValue({ id: 'existing-asset' } as any);
 
-      await expect(assetService.createAsset(createDataWithQr)).rejects.toThrow(ConflictError);
+      await expect(assetService.createAsset(mockContext, createDataWithQr)).rejects.toThrow(ConflictError);
     });
   });
 
@@ -321,14 +379,19 @@ describe('AssetService', () => {
 
       const updatedAsset = { ...mockAsset, ...updateData };
 
-      prismaMock.asset.findFirst.mockResolvedValue(mockAsset as any);
-      prismaMock.asset.update.mockResolvedValue(updatedAsset as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(mockAsset as any);
+      mockPrisma.asset.update.mockResolvedValue(updatedAsset as any);
 
-      const result = await assetService.updateAsset(mockContext, mockAssetId, updateData, mockOrganizationId);
+      const result = await assetService.updateAsset(
+        mockContext,
+        mockAssetId,
+        updateData,
+        mockOrganizationId,
+      );
 
       expect(result.name).toBe('Updated Asset');
       expect(result.description).toBe('Updated description');
-      expect(prismaMock.asset.update).toHaveBeenCalledWith({
+      expect(mockPrisma.asset.update).toHaveBeenCalledWith({
         where: { id: mockAssetId },
         data: expect.objectContaining({
           name: 'Updated Asset',
@@ -345,9 +408,9 @@ describe('AssetService', () => {
         category: AssetCategory.EQUIPMENT, // Same category
       };
 
-      prismaMock.asset.findFirst.mockResolvedValue(mockAsset as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(mockAsset as any);
       mockAssetTemplateService.getTemplateById.mockResolvedValue(mockTemplate as any);
-      prismaMock.asset.update.mockResolvedValue({
+      mockPrisma.asset.update.mockResolvedValue({
         ...mockAsset,
         assetTemplateId: newTemplateId,
       } as any);
@@ -374,11 +437,18 @@ describe('AssetService', () => {
         organizationId: mockOrganizationId,
       };
 
-      prismaMock.asset.findFirst
-        .mockResolvedValueOnce(mockAsset as any) // Asset lookup
+      // Mock asset with a different current parent to ensure parent is actually changing
+      const mockAssetWithOldParent = {
+        ...mockAsset,
+        parentId: 'old-parent-123',
+        path: '/old-parent-123/asset-123',
+      };
+      
+      mockPrisma.asset.findFirst
+        .mockResolvedValueOnce(mockAssetWithOldParent as any) // Asset lookup
         .mockResolvedValueOnce(mockNewParent as any); // New parent lookup
-      prismaMock.$executeRawUnsafe.mockResolvedValue(0); // Update descendants
-      prismaMock.asset.update.mockResolvedValue({
+      mockPrisma.$executeRawUnsafe.mockResolvedValue(0); // Update descendants
+      mockPrisma.asset.update.mockResolvedValue({
         ...mockAsset,
         parentId: newParentId,
         path: `/new-parent-123/${mockAssetId}`,
@@ -392,7 +462,10 @@ describe('AssetService', () => {
       );
 
       expect(result.path).toBe(`/new-parent-123/${mockAssetId}`);
-      expect(prismaMock.$executeRawUnsafe).toHaveBeenCalled();
+      // The $executeRawUnsafe should be called within the transaction context
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
+      const lastTxMock = (assetService as any)._lastTxMock;
+      expect(lastTxMock.$executeRawUnsafe).toHaveBeenCalled();
     });
 
     it('should prevent circular dependency when moving', async () => {
@@ -403,32 +476,47 @@ describe('AssetService', () => {
         organizationId: mockOrganizationId,
       };
 
-      prismaMock.asset.findFirst
+      mockPrisma.asset.findFirst
         .mockResolvedValueOnce(mockAsset as any) // Asset lookup
         .mockResolvedValueOnce(mockChild as any); // New parent (child) lookup
 
       await expect(
-        assetService.updateAsset(mockContext, mockAssetId, { parentId: childId }, mockOrganizationId),
+        assetService.updateAsset(
+          mockContext,
+          mockAssetId,
+          { parentId: childId },
+          mockOrganizationId,
+        ),
       ).rejects.toThrow(ConflictError);
     });
 
     it('should validate QR code uniqueness', async () => {
       const newQrCode = 'NEW-QR-123';
 
-      prismaMock.asset.findFirst
+      mockPrisma.asset.findFirst
         .mockResolvedValueOnce(mockAsset as any) // Asset lookup
         .mockResolvedValueOnce({ id: 'other-asset' } as any); // QR code conflict
 
       await expect(
-        assetService.updateAsset(mockContext, mockAssetId, { qrCode: newQrCode }, mockOrganizationId),
+        assetService.updateAsset(
+          mockContext,
+          mockAssetId,
+          { qrCode: newQrCode },
+          mockOrganizationId,
+        ),
       ).rejects.toThrow(ConflictError);
     });
 
     it('should throw error if asset not found', async () => {
-      prismaMock.asset.findFirst.mockResolvedValue(null);
+      mockPrisma.asset.findFirst.mockResolvedValue(null);
 
       await expect(
-        assetService.updateAsset(mockContext, mockAssetId, { name: 'New Name' }, mockOrganizationId),
+        assetService.updateAsset(
+          mockContext,
+          mockAssetId,
+          { name: 'New Name' },
+          mockOrganizationId,
+        ),
       ).rejects.toThrow(NotFoundError);
     });
   });
@@ -442,12 +530,12 @@ describe('AssetService', () => {
     };
 
     it('should delete asset successfully', async () => {
-      prismaMock.asset.findFirst.mockResolvedValue(mockAsset as any);
-      prismaMock.asset.delete.mockResolvedValue(mockAsset as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(mockAsset as any);
+      mockPrisma.asset.delete.mockResolvedValue(mockAsset as any);
 
-      await assetService.deleteAsset(mockAssetId, mockOrganizationId);
+      await assetService.deleteAsset(mockContext, mockAssetId, mockOrganizationId);
 
-      expect(prismaMock.asset.delete).toHaveBeenCalledWith({
+      expect(mockPrisma.asset.delete).toHaveBeenCalledWith({
         where: { id: mockAssetId },
       });
     });
@@ -458,9 +546,9 @@ describe('AssetService', () => {
         _count: { children: 2, tasks: 0, attachments: 0 },
       };
 
-      prismaMock.asset.findFirst.mockResolvedValue(assetWithChildren as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(assetWithChildren as any);
 
-      await expect(assetService.deleteAsset(mockAssetId, mockOrganizationId)).rejects.toThrow(
+      await expect(assetService.deleteAsset(mockContext, mockAssetId, mockOrganizationId)).rejects.toThrow(
         ConflictError,
       );
     });
@@ -471,12 +559,12 @@ describe('AssetService', () => {
         _count: { children: 2, tasks: 0, attachments: 0 },
       };
 
-      prismaMock.asset.findFirst.mockResolvedValue(assetWithChildren as any);
-      prismaMock.asset.delete.mockResolvedValue(assetWithChildren as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(assetWithChildren as any);
+      mockPrisma.asset.delete.mockResolvedValue(assetWithChildren as any);
 
-      await assetService.deleteAsset(mockAssetId, mockOrganizationId, true);
+      await assetService.deleteAsset(mockContext, mockAssetId, mockOrganizationId, true);
 
-      expect(prismaMock.asset.delete).toHaveBeenCalled();
+      expect(mockPrisma.asset.delete).toHaveBeenCalled();
     });
 
     it('should prevent deletion of asset with active tasks', async () => {
@@ -485,18 +573,18 @@ describe('AssetService', () => {
         _count: { children: 0, tasks: 3, attachments: 0 },
       };
 
-      prismaMock.asset.findFirst.mockResolvedValue(assetWithTasks as any);
-      prismaMock.task.count.mockResolvedValue(2); // Active tasks
+      mockPrisma.asset.findFirst.mockResolvedValue(assetWithTasks as any);
+      mockPrisma.task.count.mockResolvedValue(2); // Active tasks
 
-      await expect(assetService.deleteAsset(mockAssetId, mockOrganizationId)).rejects.toThrow(
+      await expect(assetService.deleteAsset(mockContext, mockAssetId, mockOrganizationId)).rejects.toThrow(
         ConflictError,
       );
     });
 
     it('should throw error if asset not found', async () => {
-      prismaMock.asset.findFirst.mockResolvedValue(null);
+      mockPrisma.asset.findFirst.mockResolvedValue(null);
 
-      await expect(assetService.deleteAsset(mockAssetId, mockOrganizationId)).rejects.toThrow(
+      await expect(assetService.deleteAsset(mockContext, mockAssetId, mockOrganizationId)).rejects.toThrow(
         NotFoundError,
       );
     });
@@ -524,11 +612,11 @@ describe('AssetService', () => {
 
     it('should return paginated assets', async () => {
       // Mock the individual prisma methods that will be called in the transaction
-      prismaMock.asset.findMany.mockResolvedValue(mockAssets as any);
-      prismaMock.asset.count.mockResolvedValue(2);
+      mockPrisma.asset.findMany.mockResolvedValue(mockAssets as any);
+      mockPrisma.asset.count.mockResolvedValue(2);
 
       // Override the default transaction mock for this test
-      (prismaMock.$transaction as jest.Mock).mockImplementationOnce((queries) => {
+      (mockPrisma.$transaction as jest.Mock).mockImplementationOnce((queries) => {
         // Execute the promises in the array
         return Promise.all(queries);
       });
@@ -547,11 +635,11 @@ describe('AssetService', () => {
     it('should filter by name', async () => {
       const filteredAssets = [mockAssets[0]];
       // Mock the individual prisma methods that will be called in the transaction
-      prismaMock.asset.findMany.mockResolvedValue(filteredAssets as any);
-      prismaMock.asset.count.mockResolvedValue(1);
+      mockPrisma.asset.findMany.mockResolvedValue(filteredAssets as any);
+      mockPrisma.asset.count.mockResolvedValue(1);
 
       // Override the default transaction mock for this test
-      (prismaMock.$transaction as jest.Mock).mockImplementationOnce((queries) => {
+      (mockPrisma.$transaction as jest.Mock).mockImplementationOnce((queries) => {
         // Execute the promises in the array
         return Promise.all(queries);
       });
@@ -566,7 +654,7 @@ describe('AssetService', () => {
 
     it('should filter by category', async () => {
       const filteredAssets = [mockAssets[1]];
-      (prismaMock.$transaction as jest.Mock).mockResolvedValueOnce([filteredAssets, 1]);
+      (mockPrisma.$transaction as jest.Mock).mockResolvedValueOnce([filteredAssets, 1]);
 
       const result = await assetService.findAssets(mockOrganizationId, {
         category: AssetCategory.FURNITURE,
@@ -578,7 +666,7 @@ describe('AssetService', () => {
 
     it('should filter by status', async () => {
       const filteredAssets = [mockAssets[1]];
-      (prismaMock.$transaction as jest.Mock).mockResolvedValueOnce([filteredAssets, 1]);
+      (mockPrisma.$transaction as jest.Mock).mockResolvedValueOnce([filteredAssets, 1]);
 
       const result = await assetService.findAssets(mockOrganizationId, {
         status: AssetStatus.MAINTENANCE,
@@ -590,7 +678,7 @@ describe('AssetService', () => {
 
     it('should filter by tags', async () => {
       const filteredAssets = [mockAssets[0]];
-      (prismaMock.$transaction as jest.Mock).mockResolvedValueOnce([filteredAssets, 1]);
+      (mockPrisma.$transaction as jest.Mock).mockResolvedValueOnce([filteredAssets, 1]);
 
       const result = await assetService.findAssets(mockOrganizationId, {
         tags: ['warehouse'],
@@ -604,13 +692,13 @@ describe('AssetService', () => {
       const expiryDate = new Date();
       expiryDate.setDate(expiryDate.getDate() + 30);
 
-      (prismaMock.$transaction as jest.Mock).mockResolvedValueOnce([[], 0]);
+      (mockPrisma.$transaction as jest.Mock).mockResolvedValueOnce([[], 0]);
 
       await assetService.findAssets(mockOrganizationId, {
         warrantyExpiring: { before: expiryDate },
       });
 
-      expect(prismaMock.$transaction).toHaveBeenCalled();
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
     });
   });
 
@@ -651,7 +739,7 @@ describe('AssetService', () => {
     ];
 
     it('should return asset tree structure', async () => {
-      prismaMock.asset.findMany.mockResolvedValue(mockTreeAssets as any);
+      mockPrisma.asset.findMany.mockResolvedValue(mockTreeAssets as any);
 
       const result = await assetService.getAssetTree(mockOrganizationId);
 
@@ -664,8 +752,8 @@ describe('AssetService', () => {
     });
 
     it('should return subtree for specific root', async () => {
-      prismaMock.asset.findFirst.mockResolvedValue(mockTreeAssets[0] as any); // Root lookup
-      prismaMock.asset.findMany.mockResolvedValue(mockTreeAssets as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(mockTreeAssets[0] as any); // Root lookup
+      mockPrisma.asset.findMany.mockResolvedValue(mockTreeAssets as any);
 
       const result = await assetService.getAssetTree(mockOrganizationId, 'root-1');
 
@@ -682,8 +770,8 @@ describe('AssetService', () => {
         organizationId: mockOrganizationId,
       };
 
-      prismaMock.asset.findFirst.mockResolvedValue(mockAsset as any);
-      prismaMock.asset.update.mockResolvedValue({
+      mockPrisma.asset.findFirst.mockResolvedValue(mockAsset as any);
+      mockPrisma.asset.update.mockResolvedValue({
         ...mockAsset,
         status: AssetStatus.MAINTENANCE,
       } as any);
@@ -704,7 +792,7 @@ describe('AssetService', () => {
         organizationId: mockOrganizationId,
       };
 
-      prismaMock.asset.findFirst.mockResolvedValue(mockAsset as any);
+      mockPrisma.asset.findFirst.mockResolvedValue(mockAsset as any);
 
       await expect(
         assetService.updateAssetStatus(mockAssetId, AssetStatus.OPERATIONAL, mockOrganizationId),
@@ -729,12 +817,12 @@ describe('AssetService', () => {
         },
       ];
 
-      prismaMock.asset.findMany.mockResolvedValue(expiringAssets as any);
+      mockPrisma.asset.findMany.mockResolvedValue(expiringAssets as any);
 
       const result = await assetService.getWarrantyExpiringAssets(mockOrganizationId, 30);
 
       expect(result).toHaveLength(2);
-      expect(prismaMock.asset.findMany).toHaveBeenCalledWith({
+      expect(mockPrisma.asset.findMany).toHaveBeenCalledWith({
         where: expect.objectContaining({
           organizationId: mockOrganizationId,
           warrantyLifetime: false,
@@ -769,17 +857,17 @@ describe('AssetService', () => {
         { id: 'loc-2', name: 'Office' },
       ];
 
-      prismaMock.asset.count.mockResolvedValue(mockStats.total);
+      mockPrisma.asset.count.mockResolvedValue(mockStats.total);
       // Mock groupBy calls separately
-      (prismaMock.asset.groupBy as jest.Mock)
+      (mockPrisma.asset.groupBy as jest.Mock)
         .mockResolvedValueOnce(mockStats.byCategory as any)
         .mockResolvedValueOnce(mockStats.byStatus as any)
         .mockResolvedValueOnce(mockStats.byLocation as any);
-      prismaMock.asset.findMany.mockResolvedValue([]); // Warranty expiring
-      prismaMock.asset.aggregate.mockResolvedValue({
+      mockPrisma.asset.findMany.mockResolvedValue([]); // Warranty expiring
+      mockPrisma.asset.aggregate.mockResolvedValue({
         _sum: { purchasePrice: new Prisma.Decimal(25000) },
       } as any);
-      prismaMock.location.findMany.mockResolvedValue(mockLocations as any);
+      mockPrisma.location.findMany.mockResolvedValue(mockLocations as any);
 
       const result = await assetService.getAssetStatistics(mockOrganizationId);
 

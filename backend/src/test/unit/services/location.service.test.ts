@@ -1,6 +1,8 @@
-import { LocationService } from '../../../services/location.service';
 import { AppError, NotFoundError, ConflictError } from '../../../utils/errors';
-import { prismaMock } from '../../prisma-singleton';
+
+// Import modules
+import { LocationService } from '../../../services/location.service';
+import { prismaMock } from '../../../test/prisma-singleton';
 
 describe('LocationService', () => {
   let locationService: LocationService;
@@ -11,6 +13,49 @@ describe('LocationService', () => {
   beforeEach(() => {
     locationService = new LocationService();
     jest.clearAllMocks();
+
+    // Mock the $transaction method properly
+    (prismaMock.$transaction as jest.Mock).mockImplementation((callback) => {
+      if (typeof callback === 'function') {
+        // For callback-based transactions, pass the mocked prisma client
+        // Create a transaction client that mirrors prismaMock but with distinct mocks
+        const txMock = {
+          location: {
+            findFirst: jest.fn(),
+            findUnique: jest.fn(),
+            findMany: jest.fn(),
+            create: jest.fn(),
+            update: jest.fn(),
+            delete: jest.fn(),
+            count: jest.fn(),
+          },
+          organization: {
+            findUnique: jest.fn(),
+          },
+          asset: {
+            count: jest.fn(),
+          },
+        };
+        
+        // Copy over the mock implementations for the transaction context
+        txMock.location.findFirst.mockImplementation(prismaMock.location.findFirst);
+        txMock.location.findUnique.mockImplementation(prismaMock.location.findUnique);
+        txMock.location.findMany.mockImplementation(prismaMock.location.findMany);
+        txMock.location.create.mockImplementation(prismaMock.location.create);
+        txMock.location.update.mockImplementation(prismaMock.location.update);
+        txMock.location.delete.mockImplementation(prismaMock.location.delete);
+        txMock.location.count.mockImplementation(prismaMock.location.count);
+        txMock.organization.findUnique.mockImplementation(prismaMock.organization.findUnique);
+        txMock.asset.count.mockImplementation(prismaMock.asset.count);
+        
+        return callback(txMock);
+      }
+      // For array-based transactions
+      if (Array.isArray(callback)) {
+        return Promise.all(callback);
+      }
+      return Promise.resolve([]);
+    });
   });
 
   describe('createLocation', () => {
@@ -65,8 +110,7 @@ describe('LocationService', () => {
       };
 
       prismaMock.organization.findUnique.mockResolvedValue({ id: mockOrganizationId } as any);
-      prismaMock.location.findFirst.mockResolvedValue(null);
-      prismaMock.location.findUnique.mockResolvedValue(mockParent as any);
+      prismaMock.location.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(mockParent as any);
       prismaMock.location.create.mockResolvedValue({ ...mockLocation, path: '' } as any);
       prismaMock.location.update.mockResolvedValue(mockLocation as any);
 
@@ -136,13 +180,16 @@ describe('LocationService', () => {
         { id: 'child2', path: 'root.child.child2' },
       ];
 
-      prismaMock.location.findUnique
-        .mockResolvedValueOnce(mockLocation as any)
-        .mockResolvedValueOnce(newParent as any);
+      // Mock both regular calls and transaction calls
+      prismaMock.location.findFirst
+        .mockResolvedValueOnce(mockLocation as any)  // For tx.location.findFirst (locationToMove)
+        .mockResolvedValueOnce(newParent as any)     // For tx.location.findFirst (newParent)
+        .mockResolvedValueOnce(null);                // For existing name check
       prismaMock.location.findMany.mockResolvedValue(descendants as any);
-      prismaMock.$transaction.mockImplementation(() =>
-        Promise.resolve([{ ...mockLocation, path: 'new-parent.child' }]),
-      );
+      prismaMock.location.update.mockResolvedValue({
+        ...mockLocation,
+        path: 'new-parent.child',
+      } as any);
 
       const result = await locationService.moveLocation(
         mockLocationId,
@@ -150,7 +197,7 @@ describe('LocationService', () => {
         mockOrganizationId,
       );
 
-      expect(prismaMock.$transaction).toHaveBeenCalled();
+      expect(prismaMock.location.update).toHaveBeenCalled();
       expect(result.path).toBe('new-parent.child');
     });
 
@@ -187,11 +234,15 @@ describe('LocationService', () => {
     });
 
     it('should handle move to root (null parent)', async () => {
-      prismaMock.location.findUnique.mockResolvedValueOnce(mockLocation as any);
+      prismaMock.location.findFirst
+        .mockResolvedValueOnce(mockLocation as any)  // For tx.location.findFirst (locationToMove)
+        .mockResolvedValueOnce(null);                // For existing name check
       prismaMock.location.findMany.mockResolvedValue([]);
-      prismaMock.$transaction.mockImplementation(() =>
-        Promise.resolve([{ ...mockLocation, path: mockLocationId, parentId: null }]),
-      );
+      prismaMock.location.update.mockResolvedValue({
+        ...mockLocation,
+        path: mockLocationId,
+        parentId: null,
+      } as any);
 
       const result = await locationService.moveLocation(mockLocationId, null, mockOrganizationId);
 
@@ -203,7 +254,7 @@ describe('LocationService', () => {
     it('should delete location successfully', async () => {
       const mockLocation = { id: mockLocationId };
 
-      prismaMock.location.findUnique.mockResolvedValue(mockLocation as any);
+      prismaMock.location.findFirst.mockResolvedValue(mockLocation as any); // For getLocationById
       prismaMock.location.count.mockResolvedValueOnce(0); // no children
       prismaMock.asset.count.mockResolvedValue(0); // no assets
       prismaMock.location.delete.mockResolvedValue(mockLocation as any);
@@ -218,7 +269,7 @@ describe('LocationService', () => {
     it('should throw error if location has children', async () => {
       const mockLocation = { id: mockLocationId };
 
-      prismaMock.location.findUnique.mockResolvedValue(mockLocation as any);
+      prismaMock.location.findFirst.mockResolvedValue(mockLocation as any); // For getLocationById
       prismaMock.location.count.mockResolvedValueOnce(1); // has children
 
       await expect(
@@ -229,7 +280,7 @@ describe('LocationService', () => {
     it('should throw error if location has assets', async () => {
       const mockLocation = { id: mockLocationId };
 
-      prismaMock.location.findUnique.mockResolvedValue(mockLocation as any);
+      prismaMock.location.findFirst.mockResolvedValue(mockLocation as any); // For getLocationById
       prismaMock.location.count.mockResolvedValue(0); // no children
       prismaMock.asset.count.mockResolvedValue(1); // has assets
 
@@ -272,14 +323,17 @@ describe('LocationService', () => {
         { id: 'desc2', path: 'root.child.desc2' },
       ];
 
-      prismaMock.location.findUnique.mockResolvedValue(mockLocation as any);
+      prismaMock.location.findFirst.mockResolvedValue(mockLocation as any); // For getLocationById
       prismaMock.location.findMany.mockResolvedValue(mockDescendants as any);
 
       const result = await locationService.findSubtree(mockLocationId, mockOrganizationId);
 
       expect(result).toHaveLength(2);
       expect(prismaMock.location.findMany).toHaveBeenCalledWith({
-        where: { path: { startsWith: 'root.child.' } },
+        where: {
+          organizationId: mockOrganizationId,
+          path: { startsWith: 'root.child.' },
+        },
         orderBy: { path: 'asc' },
       });
     });
@@ -293,14 +347,17 @@ describe('LocationService', () => {
         { id: 'child', path: 'root.child' },
       ];
 
-      prismaMock.location.findUnique.mockResolvedValue(mockLocation as any);
+      prismaMock.location.findFirst.mockResolvedValue(mockLocation as any); // For getLocationById
       prismaMock.location.findMany.mockResolvedValue(mockAncestors as any);
 
       const result = await locationService.findAncestors('grandchild', mockOrganizationId);
 
       expect(result).toHaveLength(2);
       expect(prismaMock.location.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ['root', 'child'] } },
+        where: {
+          id: { in: ['root', 'child'] },
+          organizationId: mockOrganizationId,
+        },
         orderBy: { path: 'asc' },
       });
     });
@@ -308,7 +365,7 @@ describe('LocationService', () => {
     it('should return empty array for root location', async () => {
       const mockLocation = { id: 'root', path: 'root' };
 
-      prismaMock.location.findUnique.mockResolvedValue(mockLocation as any);
+      prismaMock.location.findFirst.mockResolvedValue(mockLocation as any); // For getLocationById
 
       const result = await locationService.findAncestors('root', mockOrganizationId);
 

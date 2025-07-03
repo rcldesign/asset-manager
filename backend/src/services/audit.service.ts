@@ -1,6 +1,7 @@
-import { PrismaClient, ActionType, Prisma } from '@prisma/client';
-import { IRequestContext } from '../interfaces/context.interface';
-import { TransactionPrismaClient } from '../types/prisma.types';
+import type { PrismaClient, ActionType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { IRequestContext } from '../interfaces/context.interface';
+import type { TransactionPrismaClient } from '../types/prisma.types';
 import { webhookService } from './webhook.service';
 import type { AuditCreatedPayload } from '../types/webhook-payloads';
 
@@ -34,10 +35,7 @@ export class AuditService {
    * Accepts either the main PrismaClient or a TransactionPrismaClient
    * for use within transactions.
    */
-  async log(
-    prisma: PrismaClient | TransactionPrismaClient,
-    logData: IAuditLogData
-  ): Promise<void> {
+  async log(prisma: PrismaClient | TransactionPrismaClient, logData: IAuditLogData): Promise<void> {
     const auditRecord = await prisma.auditTrail.create({
       data: {
         model: logData.model,
@@ -63,24 +61,27 @@ export class AuditService {
         user: {
           id: logData.context.userId,
           email: '', // Will be populated by createEnhancedEvent
-          name: '',  // Will be populated by createEnhancedEvent
-          role: logData.context.userRole || 'VIEWER'
+          name: '', // Will be populated by createEnhancedEvent
+          role: logData.context.userRole || 'VIEWER',
         },
-        changes: (logData.oldValue || logData.newValue) ? {
-          oldValue: logData.oldValue,
-          newValue: logData.newValue
-        } : undefined,
+        changes:
+          logData.oldValue || logData.newValue
+            ? {
+                oldValue: logData.oldValue,
+                newValue: logData.newValue,
+              }
+            : undefined,
         affectedEntity: {
           type: logData.model,
           id: logData.recordId,
-        }
+        },
       };
 
       const enhancedEvent = await webhookService.createEnhancedEvent(
         'audit.created',
         logData.context.organizationId,
         logData.context.userId,
-        payload
+        payload,
       );
 
       await webhookService.emitEvent(enhancedEvent);
@@ -96,7 +97,7 @@ export class AuditService {
    */
   async logBulk(
     prisma: PrismaClient | TransactionPrismaClient,
-    logData: IBulkAuditLogData
+    logData: IBulkAuditLogData,
   ): Promise<void> {
     await prisma.auditTrail.create({
       data: {
@@ -129,15 +130,15 @@ export class AuditService {
     pagination: {
       page: number;
       limit: number;
-    } = { page: 1, limit: 50 }
+    } = { page: 1, limit: 50 },
   ) {
     const where: any = {};
-    
+
     if (filters.model) where.model = filters.model;
     if (filters.recordId) where.recordId = filters.recordId;
     if (filters.userId) where.userId = filters.userId;
     if (filters.action) where.action = filters.action;
-    
+
     if (filters.fromDate || filters.toDate) {
       where.createdAt = {};
       if (filters.fromDate) where.createdAt.gte = filters.fromDate;

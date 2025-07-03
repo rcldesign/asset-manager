@@ -2,37 +2,70 @@ import { processReportJob } from '../../../workers/report.worker';
 import { jest } from '@jest/globals';
 import type { Job } from 'bullmq';
 import type { ReportJob } from '../../../lib/queue';
+import type { FileStorageService as OriginalFileStorageService } from '../../../services/file-storage.service';
+import type { Stats } from 'fs';
+import type { PrismaClient } from '@prisma/client';
+import type { addEmailJob as originalAddEmailJob } from '../../../lib/queue';
+import type { createWriteStream as originalCreateWriteStream } from 'fs';
+import type {
+  readFile as originalReadFile,
+  stat as originalStat,
+  writeFile as originalWriteFile,
+  mkdir as originalMkdir,
+  unlink as originalUnlink,
+} from 'fs/promises';
+import type { Workbook as OriginalWorkbook } from 'exceljs';
+import type { createObjectCsvStringifier as originalCreateObjectCsvStringifier } from 'csv-writer';
+import { prismaMock } from '../../../test/prisma-singleton';
+// import PDFDocument from 'pdfkit'; // TODO: Use if needed
+
+// Mock type definitions
+interface MockPDFDocument {
+  fontSize: jest.MockedFunction<any>;
+  text: jest.MockedFunction<any>;
+  moveDown: jest.MockedFunction<any>;
+  addPage: jest.MockedFunction<any>;
+  pipe: jest.MockedFunction<any>;
+  end: jest.MockedFunction<any>;
+}
+
+// Use the shared prisma mock
+const mockPrismaExtensions = {
+  activityStream: {
+    findMany: jest.fn(),
+  },
+  reportHistory: {
+    create: jest.fn(),
+  },
+  scheduledReport: {
+    update: jest.fn(),
+  },
+} as unknown as jest.Mocked<PrismaClient>;
+
+const mockWorkbook = {
+  creator: '',
+  created: new Date(),
+  addWorksheet: jest.fn().mockReturnValue({
+    columns: [],
+    addRow: jest.fn(),
+    addRows: jest.fn(),
+    getRow: jest.fn().mockReturnValue({
+      font: {},
+    }),
+    autoFilter: {},
+  }),
+  xlsx: {
+    writeFile: jest.fn(),
+  },
+} as unknown as jest.Mocked<OriginalWorkbook>;
 
 // Mock dependencies
 jest.mock('../../../lib/prisma', () => ({
-  prisma: {
-    asset: {
-      findMany: jest.fn(),
-    },
-    task: {
-      findMany: jest.fn(),
-    },
-    user: {
-      groupBy: jest.fn(),
-      count: jest.fn(),
-    },
-    location: {
-      findMany: jest.fn(),
-    },
-    activityStream: {
-      findMany: jest.fn(),
-    },
-    reportHistory: {
-      create: jest.fn(),
-    },
-    scheduledReport: {
-      update: jest.fn(),
-    },
-  },
+  prisma: prismaMock,
 }));
 
 jest.mock('../../../lib/queue', () => ({
-  addEmailJob: jest.fn(),
+  addEmailJob: jest.fn<typeof originalAddEmailJob>(),
 }));
 
 jest.mock('../../../services/file-storage.service', () => ({
@@ -40,20 +73,20 @@ jest.mock('../../../services/file-storage.service', () => ({
     uploadReportFile: jest.fn().mockResolvedValue({
       id: 'file-123',
       fileSizeBytes: 1024,
-    }),
+    } as Awaited<ReturnType<typeof OriginalFileStorageService.prototype.uploadReportFile>>),
   })),
 }));
 
 jest.mock('fs/promises', () => ({
-  readFile: jest.fn(),
-  stat: jest.fn().mockResolvedValue({ size: 1024 }),
-  writeFile: jest.fn(),
-  mkdir: jest.fn(),
-  unlink: jest.fn(),
+  readFile: jest.fn<typeof originalReadFile>(),
+  stat: jest.fn<typeof originalStat>().mockResolvedValue({ size: 1024 } as Stats),
+  writeFile: jest.fn<typeof originalWriteFile>(),
+  mkdir: jest.fn<typeof originalMkdir>(),
+  unlink: jest.fn<typeof originalUnlink>(),
 }));
 
 jest.mock('fs', () => ({
-  createWriteStream: jest.fn().mockReturnValue({
+  createWriteStream: jest.fn<typeof originalCreateWriteStream>().mockReturnValue({
     on: jest.fn(),
   }),
 }));
@@ -64,7 +97,7 @@ jest.mock('path', () => ({
 }));
 
 jest.mock('pdfkit', () => {
-  return jest.fn().mockImplementation(() => ({
+  const mockPdfDoc: MockPDFDocument = {
     fontSize: jest.fn().mockReturnThis(),
     text: jest.fn().mockReturnThis(),
     moveDown: jest.fn().mockReturnThis(),
@@ -77,33 +110,19 @@ jest.mock('pdfkit', () => {
       }),
     }),
     end: jest.fn(),
-  }));
+  };
+  return jest.fn<() => MockPDFDocument>().mockImplementation(() => mockPdfDoc);
 });
 
 jest.mock('csv-writer', () => ({
-  createObjectCsvStringifier: jest.fn().mockReturnValue({
+  createObjectCsvStringifier: jest.fn<typeof originalCreateObjectCsvStringifier>().mockReturnValue({
     getHeaderString: jest.fn().mockReturnValue('header\n'),
     stringifyRecords: jest.fn().mockReturnValue('data\n'),
   }),
 }));
 
 jest.mock('exceljs', () => ({
-  Workbook: jest.fn().mockImplementation(() => ({
-    creator: '',
-    created: new Date(),
-    addWorksheet: jest.fn().mockReturnValue({
-      columns: [],
-      addRow: jest.fn(),
-      addRows: jest.fn(),
-      getRow: jest.fn().mockReturnValue({
-        font: {},
-      }),
-      autoFilter: {},
-    }),
-    xlsx: {
-      writeFile: jest.fn(),
-    },
-  })),
+  Workbook: jest.fn<() => OriginalWorkbook>().mockImplementation(() => mockWorkbook),
 }));
 
 // Mock logger
@@ -142,7 +161,7 @@ describe('Report Worker', () => {
   describe('processReportJob', () => {
     it('should process asset report successfully', async () => {
       const { prisma } = await import('../../../lib/prisma');
-      
+
       // Mock asset data
       (prisma.asset.findMany as jest.Mock).mockResolvedValue([
         {
@@ -177,9 +196,9 @@ describe('Report Worker', () => {
 
     it('should process maintenance report successfully', async () => {
       mockJob.data.type = 'maintenance-report';
-      
+
       const { prisma } = await import('../../../lib/prisma');
-      
+
       // Mock task data
       (prisma.task.findMany as jest.Mock).mockResolvedValue([
         {
@@ -206,23 +225,17 @@ describe('Report Worker', () => {
 
     it('should process usage statistics report successfully', async () => {
       mockJob.data.type = 'usage-statistics';
-      
+
       const { prisma } = await import('../../../lib/prisma');
-      
+
       // Mock various statistics data
-      (prisma.user.groupBy as jest.Mock).mockResolvedValue([
-        { role: 'MANAGER', _count: 5 },
-      ]);
+      (prisma.user.groupBy as jest.Mock).mockResolvedValue([{ role: 'MANAGER', _count: 5 }]);
       (prisma.asset.count as jest.Mock).mockResolvedValue(100);
       (prisma.asset.groupBy as jest.Mock).mockResolvedValue([
         { status: 'OPERATIONAL', _count: 90 },
       ]);
-      (prisma.task.count as jest.Mock)
-        .mockResolvedValueOnce(200)
-        .mockResolvedValueOnce(180);
-      (prisma.task.groupBy as jest.Mock).mockResolvedValue([
-        { priority: 'HIGH', _count: 50 },
-      ]);
+      (prisma.task.count as jest.Mock).mockResolvedValueOnce(200).mockResolvedValueOnce(180);
+      (prisma.task.groupBy as jest.Mock).mockResolvedValue([{ priority: 'HIGH', _count: 50 }]);
       (prisma.task.aggregate as jest.Mock).mockResolvedValue({
         _avg: { actualCost: 100 },
       });
@@ -243,9 +256,9 @@ describe('Report Worker', () => {
 
     it('should generate CSV format report', async () => {
       mockJob.data.format = 'csv';
-      
+
       const { prisma } = await import('../../../lib/prisma');
-      
+
       (prisma.asset.findMany as jest.Mock).mockResolvedValue([
         {
           id: 'asset-1',
@@ -272,9 +285,9 @@ describe('Report Worker', () => {
 
     it('should generate Excel format report', async () => {
       mockJob.data.format = 'xlsx';
-      
+
       const { prisma } = await import('../../../lib/prisma');
-      
+
       (prisma.asset.findMany as jest.Mock).mockResolvedValue([
         {
           id: 'asset-1',
@@ -304,10 +317,10 @@ describe('Report Worker', () => {
         recipients: ['test@example.com'],
         filters: {},
       };
-      
+
       const { prisma } = await import('../../../lib/prisma');
       const { addEmailJob } = await import('../../../lib/queue');
-      
+
       (prisma.asset.findMany as jest.Mock).mockResolvedValue([]);
       (prisma.reportHistory.create as jest.Mock).mockResolvedValue({
         id: 'history-123',
@@ -331,7 +344,7 @@ describe('Report Worker', () => {
 
     it('should handle errors gracefully', async () => {
       const { prisma } = await import('../../../lib/prisma');
-      
+
       (prisma.asset.findMany as jest.Mock).mockRejectedValue(new Error('Database error'));
 
       await expect(processReportJob(mockJob)).rejects.toThrow('Database error');

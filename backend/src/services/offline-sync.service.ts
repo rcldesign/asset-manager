@@ -1,13 +1,11 @@
 import { prisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
-import type { 
-  SyncClient, 
-  SyncQueue, 
+import type {
+  SyncClient,
   SyncMetadata,
-  SyncStatus,
   ConflictResolution,
   SyncOperation,
-  Prisma
+  PrismaClient,
 } from '@prisma/client';
 import crypto from 'crypto';
 import { AppError } from '../utils/errors';
@@ -48,45 +46,43 @@ export interface SyncConflict {
 }
 
 export class OfflineSyncService {
+  private prisma: PrismaClient;
   private readonly SYNC_BATCH_SIZE = 100;
   private readonly MAX_RETRY_COUNT = 3;
+
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+  }
 
   /**
    * Register or update a sync client
    */
-  async registerClient(
-    userId: string,
-    deviceId: string,
-    deviceName?: string
-  ): Promise<SyncClient> {
-    return await prisma.syncClient.upsert({
+  async registerClient(userId: string, deviceId: string, deviceName?: string): Promise<SyncClient> {
+    return await this.prisma.syncClient.upsert({
       where: {
         userId_deviceId: {
           userId,
-          deviceId
-        }
+          deviceId,
+        },
       },
       update: {
         deviceName,
         isActive: true,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       },
       create: {
         userId,
         deviceId,
         deviceName,
-        isActive: true
-      }
+        isActive: true,
+      },
     });
   }
 
   /**
    * Process sync request from a PWA client
    */
-  async processSync(
-    userId: string,
-    syncRequest: SyncRequest
-  ): Promise<SyncResponse> {
+  async processSync(userId: string, syncRequest: SyncRequest): Promise<SyncResponse> {
     const { deviceId, deviceName, syncToken, changes } = syncRequest;
 
     // Register/update client
@@ -94,7 +90,7 @@ export class OfflineSyncService {
 
     // Process incoming changes
     const conflicts: SyncConflict[] = [];
-    
+
     for (const change of changes) {
       try {
         const conflict = await this.processClientChange(client.id, userId, change);
@@ -111,36 +107,32 @@ export class OfflineSyncService {
           serverVersion: 0,
           clientData: change.payload,
           serverData: null,
-          suggestedResolution: 'SERVER_WINS' as ConflictResolution
+          suggestedResolution: 'SERVER_WINS' as ConflictResolution,
         });
       }
     }
 
     // Get server changes since last sync
-    const serverChanges = await this.getServerChanges(
-      client,
-      userId,
-      syncToken
-    );
+    const serverChanges = await this.getServerChanges(client, userId, syncToken);
 
     // Generate new sync token
     const newSyncToken = this.generateSyncToken();
 
     // Update client sync status
     const syncEndTime = new Date();
-    
-    await prisma.syncClient.update({
+
+    await this.prisma.syncClient.update({
       where: { id: client.id },
       data: {
         lastSyncAt: syncEndTime,
-        syncToken: newSyncToken
-      }
+        syncToken: newSyncToken,
+      },
     });
 
     // Emit webhook event for sync completion
     try {
       const syncStartTime = new Date(syncEndTime.getTime() - 5000); // Estimate sync duration
-      
+
       const payload: SyncCompletedPayload = {
         sync: {
           id: `sync-${client.id}-${Date.now()}`,
@@ -148,26 +140,26 @@ export class OfflineSyncService {
           deviceName: client.deviceName || undefined,
           syncToken: newSyncToken,
           startedAt: syncStartTime,
-          completedAt: syncEndTime
+          completedAt: syncEndTime,
         },
         user: {
           id: userId,
           email: '', // Will be populated by createEnhancedEvent
-          name: '',  // Will be populated by createEnhancedEvent
-          role: 'VIEWER' // Default role, will be updated by createEnhancedEvent
+          name: '', // Will be populated by createEnhancedEvent
+          role: 'VIEWER', // Default role, will be updated by createEnhancedEvent
         },
         summary: {
           uploaded: changes.length,
           downloaded: serverChanges.length,
           conflicts: conflicts.length,
-          conflictResolution: conflicts.length > 0 ? conflicts[0].suggestedResolution : undefined
-        }
+          conflictResolution: conflicts.length > 0 ? conflicts[0].suggestedResolution : undefined,
+        },
       };
 
       // Get organizationId from user
-      const user = await prisma.user.findUnique({
+      const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        select: { organizationId: true }
+        select: { organizationId: true },
       });
 
       if (user?.organizationId) {
@@ -175,7 +167,7 @@ export class OfflineSyncService {
           'sync.completed',
           user.organizationId,
           userId,
-          payload
+          payload,
         );
 
         await webhookService.emitEvent(enhancedEvent);
@@ -188,7 +180,7 @@ export class OfflineSyncService {
       syncToken: newSyncToken,
       changes: serverChanges,
       conflicts,
-      serverTime: syncEndTime.toISOString()
+      serverTime: syncEndTime.toISOString(),
     };
   }
 
@@ -198,12 +190,12 @@ export class OfflineSyncService {
   async processClientChange(
     clientId: string,
     userId: string,
-    change: SyncChange
+    change: SyncChange,
   ): Promise<SyncConflict | null> {
     const { entityType, entityId, operation, payload, clientVersion } = change;
 
     // Add to sync queue
-    const queueItem = await prisma.syncQueue.create({
+    const queueItem = await this.prisma.syncQueue.create({
       data: {
         clientId,
         entityType,
@@ -211,31 +203,26 @@ export class OfflineSyncService {
         operation,
         payload,
         clientVersion,
-        status: 'SYNCING'
-      }
+        status: 'SYNCING',
+      },
     });
 
     try {
       // Check for conflicts
-      const conflict = await this.detectConflict(
-        entityType,
-        entityId,
-        clientVersion,
-        payload
-      );
+      const conflict = await this.detectConflict(entityType, entityId, clientVersion, payload);
 
       if (conflict) {
         // Update queue item with conflict
-        await prisma.syncQueue.update({
+        await this.prisma.syncQueue.update({
           where: { id: queueItem.id },
           data: {
             status: 'CONFLICT',
-            conflictData: conflict
-          }
+            conflictData: conflict,
+          },
         });
 
         // Store conflict for resolution
-        await prisma.syncConflict.create({
+        await this.prisma.syncConflict.create({
           data: {
             entityType,
             entityId,
@@ -243,8 +230,8 @@ export class OfflineSyncService {
             serverVersion: conflict.serverVersion,
             clientData: payload,
             serverData: conflict.serverData,
-            resolution: conflict.suggestedResolution
-          }
+            resolution: conflict.suggestedResolution,
+          },
         });
 
         return conflict;
@@ -254,33 +241,27 @@ export class OfflineSyncService {
       await this.applyChange(userId, entityType, entityId, operation, payload);
 
       // Update sync metadata
-      await this.updateSyncMetadata(
-        entityType,
-        entityId,
-        clientVersion + 1,
-        userId,
-        clientId
-      );
+      await this.updateSyncMetadata(entityType, entityId, clientVersion + 1, userId, clientId);
 
       // Mark as completed
-      await prisma.syncQueue.update({
+      await this.prisma.syncQueue.update({
         where: { id: queueItem.id },
         data: {
           status: 'COMPLETED',
-          processedAt: new Date()
-        }
+          processedAt: new Date(),
+        },
       });
 
       return null;
     } catch (error) {
       // Mark as failed
-      await prisma.syncQueue.update({
+      await this.prisma.syncQueue.update({
         where: { id: queueItem.id },
         data: {
           status: 'FAILED',
           errorMessage: error instanceof Error ? error.message : 'Unknown error',
-          retryCount: { increment: 1 }
-        }
+          retryCount: { increment: 1 },
+        },
       });
       throw error;
     }
@@ -293,16 +274,16 @@ export class OfflineSyncService {
     entityType: string,
     entityId: string,
     clientVersion: number,
-    clientData: any
+    clientData: any,
   ): Promise<SyncConflict | null> {
     // Get current server metadata
-    const metadata = await prisma.syncMetadata.findUnique({
+    const metadata = await this.prisma.syncMetadata.findUnique({
       where: {
         entityType_entityId: {
           entityType,
-          entityId
-        }
-      }
+          entityId,
+        },
+      },
     });
 
     if (!metadata) {
@@ -324,7 +305,7 @@ export class OfflineSyncService {
       entityType,
       clientData,
       serverData,
-      metadata
+      metadata,
     );
 
     return {
@@ -334,7 +315,7 @@ export class OfflineSyncService {
       serverVersion: metadata.version,
       clientData,
       serverData,
-      suggestedResolution: resolution
+      suggestedResolution: resolution,
     };
   }
 
@@ -345,7 +326,7 @@ export class OfflineSyncService {
     entityType: string,
     clientData: any,
     serverData: any,
-    metadata: SyncMetadata
+    metadata: SyncMetadata,
   ): ConflictResolution {
     // If server data was modified more recently, suggest server wins
     const clientTimestamp = new Date(clientData.updatedAt || clientData.timestamp);
@@ -374,11 +355,11 @@ export class OfflineSyncService {
 
     // Check if fields don't overlap (except common fields)
     const commonFields = ['id', 'updatedAt', 'createdAt'];
-    const clientChangedFields = clientFields.filter(f => !commonFields.includes(f));
-    const serverChangedFields = serverFields.filter(f => !commonFields.includes(f));
+    const clientChangedFields = clientFields.filter((f) => !commonFields.includes(f));
+    const serverChangedFields = serverFields.filter((f) => !commonFields.includes(f));
 
-    const overlap = clientChangedFields.filter(f => serverChangedFields.includes(f));
-    
+    const overlap = clientChangedFields.filter((f) => serverChangedFields.includes(f));
+
     return overlap.length === 0;
   }
 
@@ -390,7 +371,7 @@ export class OfflineSyncService {
     entityType: string,
     entityId: string,
     operation: SyncOperation,
-    payload: any
+    payload: any,
   ): Promise<void> {
     // Validate user has permission to modify this entity
     await this.validatePermission(userId, entityType, entityId, operation);
@@ -416,26 +397,26 @@ export class OfflineSyncService {
   private async applyAssetChange(
     entityId: string,
     operation: SyncOperation,
-    payload: any
+    payload: any,
   ): Promise<void> {
     switch (operation) {
       case 'CREATE':
-        await prisma.asset.create({
+        await this.prisma.asset.create({
           data: {
             id: entityId,
-            ...payload
-          }
+            ...payload,
+          },
         });
         break;
       case 'UPDATE':
-        await prisma.asset.update({
+        await this.prisma.asset.update({
           where: { id: entityId },
-          data: payload
+          data: payload,
         });
         break;
       case 'DELETE':
-        await prisma.asset.delete({
-          where: { id: entityId }
+        await this.prisma.asset.delete({
+          where: { id: entityId },
         });
         break;
     }
@@ -447,26 +428,26 @@ export class OfflineSyncService {
   private async applyTaskChange(
     entityId: string,
     operation: SyncOperation,
-    payload: any
+    payload: any,
   ): Promise<void> {
     switch (operation) {
       case 'CREATE':
-        await prisma.task.create({
+        await this.prisma.task.create({
           data: {
             id: entityId,
-            ...payload
-          }
+            ...payload,
+          },
         });
         break;
       case 'UPDATE':
-        await prisma.task.update({
+        await this.prisma.task.update({
           where: { id: entityId },
-          data: payload
+          data: payload,
         });
         break;
       case 'DELETE':
-        await prisma.task.delete({
-          where: { id: entityId }
+        await this.prisma.task.delete({
+          where: { id: entityId },
         });
         break;
     }
@@ -478,26 +459,26 @@ export class OfflineSyncService {
   private async applyScheduleChange(
     entityId: string,
     operation: SyncOperation,
-    payload: any
+    payload: any,
   ): Promise<void> {
     switch (operation) {
       case 'CREATE':
-        await prisma.schedule.create({
+        await this.prisma.schedule.create({
           data: {
             id: entityId,
-            ...payload
-          }
+            ...payload,
+          },
         });
         break;
       case 'UPDATE':
-        await prisma.schedule.update({
+        await this.prisma.schedule.update({
           where: { id: entityId },
-          data: payload
+          data: payload,
         });
         break;
       case 'DELETE':
-        await prisma.schedule.delete({
-          where: { id: entityId }
+        await this.prisma.schedule.delete({
+          where: { id: entityId },
         });
         break;
     }
@@ -509,34 +490,28 @@ export class OfflineSyncService {
   private async getServerChanges(
     client: SyncClient,
     userId: string,
-    syncToken?: string
+    syncToken?: string,
   ): Promise<SyncChange[]> {
     const changes: SyncChange[] = [];
     const lastSyncTime = client.lastSyncAt || new Date(0);
 
     // Get all entities modified since last sync
-    const modifiedEntities = await prisma.syncMetadata.findMany({
+    const modifiedEntities = await this.prisma.syncMetadata.findMany({
       where: {
         lastModifiedAt: {
-          gt: lastSyncTime
+          gt: lastSyncTime,
         },
-        OR: [
-          { clientId: { not: client.id } },
-          { clientId: null }
-        ]
+        OR: [{ clientId: { not: client.id } }, { clientId: null }],
       },
       take: this.SYNC_BATCH_SIZE,
       orderBy: {
-        lastModifiedAt: 'asc'
-      }
+        lastModifiedAt: 'asc',
+      },
     });
 
     for (const metadata of modifiedEntities) {
       // Get entity data
-      const entityData = await this.getEntityData(
-        metadata.entityType,
-        metadata.entityId
-      );
+      const entityData = await this.getEntityData(metadata.entityType, metadata.entityId);
 
       if (entityData) {
         // Check permission
@@ -544,7 +519,7 @@ export class OfflineSyncService {
           userId,
           metadata.entityType,
           metadata.entityId,
-          'READ'
+          'READ',
         );
 
         if (hasPermission) {
@@ -554,7 +529,7 @@ export class OfflineSyncService {
             operation: metadata.deletedAt ? 'DELETE' : 'UPDATE',
             payload: entityData,
             clientVersion: metadata.version,
-            timestamp: metadata.lastModifiedAt.toISOString()
+            timestamp: metadata.lastModifiedAt.toISOString(),
           });
         }
       }
@@ -566,29 +541,26 @@ export class OfflineSyncService {
   /**
    * Get entity data by type and ID
    */
-  private async getEntityData(
-    entityType: string,
-    entityId: string
-  ): Promise<any> {
+  private async getEntityData(entityType: string, entityId: string): Promise<any> {
     switch (entityType) {
       case 'asset':
-        return await prisma.asset.findUnique({
-          where: { id: entityId }
+        return await this.prisma.asset.findUnique({
+          where: { id: entityId },
         });
       case 'task':
-        return await prisma.task.findUnique({
+        return await this.prisma.task.findUnique({
           where: { id: entityId },
           include: {
             taskAssignments: true,
             taskComments: {
               orderBy: { createdAt: 'desc' },
-              take: 10
-            }
-          }
+              take: 10,
+            },
+          },
         });
       case 'schedule':
-        return await prisma.schedule.findUnique({
-          where: { id: entityId }
+        return await this.prisma.schedule.findUnique({
+          where: { id: entityId },
         });
       default:
         return null;
@@ -603,16 +575,16 @@ export class OfflineSyncService {
     entityId: string,
     version: number,
     userId: string,
-    clientId?: string
+    clientId?: string,
   ): Promise<void> {
     const checksum = this.calculateChecksum({ entityType, entityId, version });
 
-    await prisma.syncMetadata.upsert({
+    await this.prisma.syncMetadata.upsert({
       where: {
         entityType_entityId: {
           entityType,
-          entityId
-        }
+          entityId,
+        },
       },
       update: {
         version,
@@ -620,7 +592,7 @@ export class OfflineSyncService {
         lastModifiedAt: new Date(),
         checksum,
         clientId,
-        deletedAt: null
+        deletedAt: null,
       },
       create: {
         entityType,
@@ -628,8 +600,8 @@ export class OfflineSyncService {
         version,
         lastModifiedBy: userId,
         checksum,
-        clientId
-      }
+        clientId,
+      },
     });
   }
 
@@ -640,19 +612,14 @@ export class OfflineSyncService {
     userId: string,
     entityType: string,
     entityId: string,
-    operation: SyncOperation
+    operation: SyncOperation,
   ): Promise<void> {
-    const hasPermission = await this.checkPermission(
-      userId,
-      entityType,
-      entityId,
-      operation
-    );
+    const hasPermission = await this.checkPermission(userId, entityType, entityId, operation);
 
     if (!hasPermission) {
       throw new AppError(
         `User ${userId} does not have permission to ${operation} ${entityType} ${entityId}`,
-        403
+        403,
       );
     }
   }
@@ -664,12 +631,12 @@ export class OfflineSyncService {
     userId: string,
     entityType: string,
     entityId: string,
-    operation: SyncOperation | 'READ'
+    operation: SyncOperation | 'READ',
   ): Promise<boolean> {
     // Get user and their organization
-    const user = await prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { organization: true }
+      include: { organization: true },
     });
 
     if (!user) {
@@ -679,20 +646,20 @@ export class OfflineSyncService {
     // Check entity belongs to user's organization
     switch (entityType) {
       case 'asset':
-        const asset = await prisma.asset.findUnique({
-          where: { id: entityId }
+        const asset = await this.prisma.asset.findUnique({
+          where: { id: entityId },
         });
         return asset?.organizationId === user.organizationId;
 
       case 'task':
-        const task = await prisma.task.findUnique({
-          where: { id: entityId }
+        const task = await this.prisma.task.findUnique({
+          where: { id: entityId },
         });
         return task?.organizationId === user.organizationId;
 
       case 'schedule':
-        const schedule = await prisma.schedule.findUnique({
-          where: { id: entityId }
+        const schedule = await this.prisma.schedule.findUnique({
+          where: { id: entityId },
         });
         return schedule?.organizationId === user.organizationId;
 
@@ -723,10 +690,10 @@ export class OfflineSyncService {
   async resolveConflict(
     conflictId: string,
     resolution: ConflictResolution,
-    resolvedBy: string
+    resolvedBy: string,
   ): Promise<void> {
-    const conflict = await prisma.syncConflict.findUnique({
-      where: { id: conflictId }
+    const conflict = await this.prisma.syncConflict.findUnique({
+      where: { id: conflictId },
     });
 
     if (!conflict) {
@@ -741,7 +708,7 @@ export class OfflineSyncService {
           conflict.entityType,
           conflict.entityId,
           'UPDATE',
-          conflict.clientData
+          conflict.clientData,
         );
         break;
 
@@ -751,28 +718,25 @@ export class OfflineSyncService {
 
       case 'MERGE':
         // Merge logic would go here
-        const mergedData = this.mergeData(
-          conflict.clientData,
-          conflict.serverData
-        );
+        const mergedData = this.mergeData(conflict.clientData, conflict.serverData);
         await this.applyChange(
           resolvedBy,
           conflict.entityType,
           conflict.entityId,
           'UPDATE',
-          mergedData
+          mergedData,
         );
         break;
     }
 
     // Update conflict record
-    await prisma.syncConflict.update({
+    await this.prisma.syncConflict.update({
       where: { id: conflictId },
       data: {
         resolution,
         resolvedBy,
-        resolvedAt: new Date()
-      }
+        resolvedAt: new Date(),
+      },
     });
   }
 
@@ -800,22 +764,22 @@ export class OfflineSyncService {
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
     // Delete old completed sync queue items
-    await prisma.syncQueue.deleteMany({
+    await this.prisma.syncQueue.deleteMany({
       where: {
         status: 'COMPLETED',
         processedAt: {
-          lt: cutoffDate
-        }
-      }
+          lt: cutoffDate,
+        },
+      },
     });
 
     // Delete old resolved conflicts
-    await prisma.syncConflict.deleteMany({
+    await this.prisma.syncConflict.deleteMany({
       where: {
         resolvedAt: {
-          lt: cutoffDate
-        }
-      }
+          lt: cutoffDate,
+        },
+      },
     });
 
     logger.info('Cleaned up old sync data', { cutoffDate });
@@ -825,40 +789,40 @@ export class OfflineSyncService {
    * Get sync statistics for monitoring
    */
   async getSyncStats(organizationId: string): Promise<any> {
-    const users = await prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       where: { organizationId },
-      select: { id: true }
+      select: { id: true },
     });
 
-    const userIds = users.map(u => u.id);
+    const userIds = users.map((u) => u.id);
 
-    const stats = await prisma.$transaction([
-      prisma.syncClient.count({
+    const stats = await this.prisma.$transaction([
+      this.prisma.syncClient.count({
         where: {
           userId: { in: userIds },
-          isActive: true
-        }
+          isActive: true,
+        },
       }),
-      prisma.syncQueue.groupBy({
+      this.prisma.syncQueue.groupBy({
         by: ['status'],
         where: {
           client: {
-            userId: { in: userIds }
-          }
+            userId: { in: userIds },
+          },
         },
-        _count: true
+        _count: true,
       }),
-      prisma.syncConflict.count({
+      this.prisma.syncConflict.count({
         where: {
-          resolvedAt: null
-        }
-      })
+          resolvedAt: null,
+        },
+      }),
     ]);
 
     return {
       activeClients: stats[0],
       queueStatus: stats[1],
-      unresolvedConflicts: stats[2]
+      unresolvedConflicts: stats[2],
     };
   }
 
@@ -873,7 +837,7 @@ export class OfflineSyncService {
       since?: Date;
       pageSize: number;
       pageToken?: string;
-    }
+    },
   ): Promise<{
     changes: SyncChange[];
     nextPageToken?: string;
@@ -888,25 +852,22 @@ export class OfflineSyncService {
     const whereConditions: any = {
       lastModifiedAt: since ? { gt: since } : undefined,
       entityType: entityTypes ? { in: entityTypes } : undefined,
-      OR: [
-        { clientId: { not: clientId } },
-        { clientId: null }
-      ]
+      OR: [{ clientId: { not: clientId } }, { clientId: null }],
     };
 
     // Remove undefined values
-    Object.keys(whereConditions).forEach(key => {
+    Object.keys(whereConditions).forEach((key) => {
       if (whereConditions[key] === undefined) {
         delete whereConditions[key];
       }
     });
 
     // Get changes
-    const metadata = await prisma.syncMetadata.findMany({
+    const metadata = await this.prisma.syncMetadata.findMany({
       where: whereConditions,
       orderBy: { lastModifiedAt: 'asc' },
       skip: offset,
-      take: pageSize + 1 // Get one extra to check if there are more
+      take: pageSize + 1, // Get one extra to check if there are more
     });
 
     const hasMore = metadata.length > pageSize;
@@ -921,7 +882,7 @@ export class OfflineSyncService {
         userId,
         meta.entityType,
         meta.entityId,
-        'READ'
+        'READ',
       );
 
       if (hasPermission) {
@@ -933,7 +894,7 @@ export class OfflineSyncService {
             operation: meta.deletedAt ? 'DELETE' : 'UPDATE',
             payload: entityData || {},
             clientVersion: meta.version,
-            timestamp: meta.lastModifiedAt.toISOString()
+            timestamp: meta.lastModifiedAt.toISOString(),
           });
         }
       }
@@ -942,7 +903,7 @@ export class OfflineSyncService {
     return {
       changes,
       nextPageToken: hasMore ? String(offset + pageSize) : undefined,
-      hasMore
+      hasMore,
     };
   }
 
@@ -955,7 +916,7 @@ export class OfflineSyncService {
       entityType?: string;
       page: number;
       limit: number;
-    }
+    },
   ): Promise<{
     conflicts: any[];
     total: number;
@@ -966,9 +927,9 @@ export class OfflineSyncService {
     const offset = (page - 1) * limit;
 
     // Get user's organization
-    const user = await prisma.user.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { organizationId: true }
+      select: { organizationId: true },
     });
 
     if (!user) {
@@ -978,25 +939,25 @@ export class OfflineSyncService {
     // Build query
     const whereConditions: any = {
       resolvedAt: null,
-      entityType: entityType || undefined
+      entityType: entityType || undefined,
     };
 
     // Remove undefined values
-    Object.keys(whereConditions).forEach(key => {
+    Object.keys(whereConditions).forEach((key) => {
       if (whereConditions[key] === undefined) {
         delete whereConditions[key];
       }
     });
 
     // Get conflicts and total count
-    const [conflicts, total] = await prisma.$transaction([
-      prisma.syncConflict.findMany({
+    const [conflicts, total] = await this.prisma.$transaction([
+      this.prisma.syncConflict.findMany({
         where: whereConditions,
         orderBy: { createdAt: 'desc' },
         skip: offset,
-        take: limit
+        take: limit,
       }),
-      prisma.syncConflict.count({ where: whereConditions })
+      this.prisma.syncConflict.count({ where: whereConditions }),
     ]);
 
     // Filter conflicts by permission
@@ -1006,7 +967,7 @@ export class OfflineSyncService {
         userId,
         conflict.entityType,
         conflict.entityId,
-        'UPDATE'
+        'UPDATE',
       );
       if (hasPermission) {
         filteredConflicts.push(conflict);
@@ -1017,7 +978,7 @@ export class OfflineSyncService {
       conflicts: filteredConflicts,
       total,
       page,
-      pageSize: limit
+      pageSize: limit,
     };
   }
 
@@ -1025,35 +986,35 @@ export class OfflineSyncService {
    * Get user sync status
    */
   async getUserSyncStatus(userId: string): Promise<any> {
-    const clients = await prisma.syncClient.findMany({
+    const clients = await this.prisma.syncClient.findMany({
       where: { userId, isActive: true },
       include: {
         _count: {
           select: {
             syncQueues: {
-              where: { status: { in: ['PENDING', 'FAILED'] } }
-            }
-          }
-        }
-      }
+              where: { status: { in: ['PENDING', 'FAILED'] } },
+            },
+          },
+        },
+      },
     });
 
-    const conflicts = await prisma.syncConflict.count({
+    const conflicts = await this.prisma.syncConflict.count({
       where: {
-        resolvedAt: null
+        resolvedAt: null,
         // Add entity permission check here if needed
-      }
+      },
     });
 
     return {
-      devices: clients.map(client => ({
+      devices: clients.map((client) => ({
         id: client.id,
         deviceId: client.deviceId,
         deviceName: client.deviceName,
         lastSyncAt: client.lastSyncAt,
-        pendingChanges: client._count.syncQueues
+        pendingChanges: client._count.syncQueues,
       })),
-      unresolvedConflicts: conflicts
+      unresolvedConflicts: conflicts,
     };
   }
 
@@ -1061,9 +1022,9 @@ export class OfflineSyncService {
    * Get user devices
    */
   async getUserDevices(userId: string): Promise<SyncClient[]> {
-    return await prisma.syncClient.findMany({
+    return await this.prisma.syncClient.findMany({
       where: { userId },
-      orderBy: { lastSyncAt: 'desc' }
+      orderBy: { lastSyncAt: 'desc' },
     });
   }
 
@@ -1071,17 +1032,17 @@ export class OfflineSyncService {
    * Unregister a device
    */
   async unregisterDevice(userId: string, deviceId: string): Promise<void> {
-    const client = await prisma.syncClient.findFirst({
-      where: { userId, deviceId }
+    const client = await this.prisma.syncClient.findFirst({
+      where: { userId, deviceId },
     });
 
     if (!client) {
       throw new AppError('Device not found', 404);
     }
 
-    await prisma.syncClient.update({
+    await this.prisma.syncClient.update({
       where: { id: client.id },
-      data: { isActive: false }
+      data: { isActive: false },
     });
   }
 
@@ -1090,10 +1051,10 @@ export class OfflineSyncService {
    */
   async retryFailedSync(
     userId: string,
-    deviceId: string
+    deviceId: string,
   ): Promise<{ processed: number; succeeded: number; failed: number }> {
-    const client = await prisma.syncClient.findFirst({
-      where: { userId, deviceId, isActive: true }
+    const client = await this.prisma.syncClient.findFirst({
+      where: { userId, deviceId, isActive: true },
     });
 
     if (!client) {
@@ -1101,12 +1062,12 @@ export class OfflineSyncService {
     }
 
     // Get failed sync items
-    const failedItems = await prisma.syncQueue.findMany({
+    const failedItems = await this.prisma.syncQueue.findMany({
       where: {
         clientId: client.id,
         status: 'FAILED',
-        retryCount: { lt: this.MAX_RETRY_COUNT }
-      }
+        retryCount: { lt: this.MAX_RETRY_COUNT },
+      },
     });
 
     let processed = 0;
@@ -1117,18 +1078,14 @@ export class OfflineSyncService {
       processed++;
       try {
         // Retry the sync operation
-        await this.processClientChange(
-          client.id,
-          userId,
-          {
-            entityType: item.entityType,
-            entityId: item.entityId,
-            operation: item.operation as SyncOperation,
-            payload: item.payload,
-            clientVersion: item.clientVersion,
-            timestamp: new Date().toISOString()
-          }
-        );
+        await this.processClientChange(client.id, userId, {
+          entityType: item.entityType,
+          entityId: item.entityId,
+          operation: item.operation,
+          payload: item.payload,
+          clientVersion: item.clientVersion,
+          timestamp: new Date().toISOString(),
+        });
         succeeded++;
       } catch (error) {
         failed++;
@@ -1147,7 +1104,7 @@ export class OfflineSyncService {
     options: {
       entityType?: string;
       entityIds?: string[];
-    }
+    },
   ): Promise<void> {
     const { entityType, entityIds } = options;
 
@@ -1158,17 +1115,17 @@ export class OfflineSyncService {
           entityType || 'unknown',
           entityId,
           0, // Force version update
-          userId
+          userId,
         );
       }
     } else if (entityType) {
       // Invalidate all entities of a type
-      await prisma.syncMetadata.updateMany({
+      await this.prisma.syncMetadata.updateMany({
         where: { entityType },
         data: {
           lastModifiedAt: new Date(),
-          lastModifiedBy: userId
-        }
+          lastModifiedBy: userId,
+        },
       });
     }
 

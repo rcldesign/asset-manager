@@ -80,7 +80,7 @@ router.post(
   validateBody(dataExportRequestSchema),
   async (req, res, next) => {
     try {
-      const { userId, includeRelatedData, format } = req.body;
+      const { userId, includeRelatedData } = req.body;
       const authenticatedReq = req as AuthenticatedRequest;
 
       // Verify user exists and belongs to the organization
@@ -93,21 +93,21 @@ router.post(
       if (includeRelatedData) {
         const exportResult = await dataExportService.exportUserData(
           authenticatedReq.context!,
-          userId
+          userId,
         );
         res.json(exportResult);
       } else {
         // Export basic user data only
         const exportResult = await dataExportService.exportUserData(
           authenticatedReq.context!,
-          userId
+          userId,
         );
         res.json(exportResult);
       }
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -169,7 +169,7 @@ router.post(
   validateBody(dataDeleteRequestSchema),
   async (req, res, next) => {
     try {
-      const { userId, confirmation } = req.body;
+      const { userId } = req.body;
       const authenticatedReq = req as AuthenticatedRequest;
 
       // Verify user exists and belongs to the organization
@@ -179,7 +179,7 @@ router.post(
       }
 
       // Delete user and all associated data
-      await userService.deleteUser(authenticatedReq.context!, userId);
+      await userService.deleteUser(userId, authenticatedReq.context!);
 
       res.json({
         message: 'User data deleted successfully',
@@ -189,7 +189,7 @@ router.post(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 /**
@@ -263,7 +263,7 @@ router.get(
   validateParams(userIdParamsSchema),
   async (req, res, next) => {
     try {
-      const { userId } = req.params;
+      const { userId } = req.params as { userId: string };
       const authenticatedReq = req as AuthenticatedRequest;
 
       // Verify user exists and belongs to the organization
@@ -299,7 +299,7 @@ router.get(
     } catch (error) {
       next(error);
     }
-  }
+  },
 );
 
 export default router;

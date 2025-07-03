@@ -103,7 +103,7 @@ conditionalDescribe('Data Import/Export API Integration Tests', () => {
       expect(response.headers['content-type']).toBe('text/csv; charset=utf-8');
       expect(response.headers['content-disposition']).toContain('attachment');
       expect(response.headers['content-disposition']).toContain('assets-export');
-      
+
       const csvContent = response.text;
       expect(csvContent).toContain('name,category,status,purchasePrice,serialNumber');
       expect(csvContent).toContain('Export Asset 1');
@@ -126,7 +126,7 @@ conditionalDescribe('Data Import/Export API Integration Tests', () => {
 
       expect(response.headers['content-type']).toBe('application/json; charset=utf-8');
       expect(response.headers['content-disposition']).toContain('tasks-export');
-      
+
       const jsonData = response.body;
       expect(jsonData).toHaveProperty('metadata');
       expect(jsonData).toHaveProperty('data');
@@ -149,7 +149,9 @@ conditionalDescribe('Data Import/Export API Integration Tests', () => {
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
 
-      expect(response.headers['content-type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      expect(response.headers['content-type']).toBe(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
       expect(response.headers['content-disposition']).toContain('assets-export.xlsx');
     });
 
@@ -171,7 +173,7 @@ conditionalDescribe('Data Import/Export API Integration Tests', () => {
         .expect(200);
 
       const csvContent = response.text;
-      const lines = csvContent.split('\n').filter(line => line.trim());
+      const lines = csvContent.split('\n').filter((line) => line.trim());
       expect(lines).toHaveLength(2); // Header + 1 filtered row
     });
 
@@ -206,7 +208,7 @@ conditionalDescribe('Data Import/Export API Integration Tests', () => {
         .expect(200);
 
       const csvContent = response.text;
-      const lines = csvContent.split('\n').filter(line => line.trim());
+      const lines = csvContent.split('\n').filter((line) => line.trim());
       expect(lines).toHaveLength(1); // Only header
     });
 
@@ -568,7 +570,7 @@ Import Asset 3,Equipment,OPERATIONAL,2000,IMP003,Warehouse`;
 
       expect(response.body).toHaveProperty('templates');
       expect(response.body.templates).toBeInstanceOf(Array);
-      
+
       const assetTemplate = response.body.templates.find((t: any) => t.entityType === 'assets');
       expect(assetTemplate).toBeTruthy();
       expect(assetTemplate).toHaveProperty('fields');
@@ -595,9 +597,9 @@ Import Asset 3,Equipment,OPERATIONAL,2000,IMP003,Warehouse`;
 Test Asset,Computer,Active`; // Different column names
 
       const fieldMapping = {
-        'asset_name': 'name',
-        'asset_category': 'category',
-        'asset_status': 'status',
+        asset_name: 'name',
+        asset_category: 'category',
+        asset_status: 'status',
       };
 
       const response = await request(app)
@@ -647,7 +649,8 @@ Test Asset,Computer,Active`; // Different column names
 
   describe('Performance and error handling', () => {
     it('should handle large file imports efficiently', async () => {
-      const largeContent = 'name,category,status\n' + 
+      const largeContent =
+        'name,category,status\n' +
         Array.from({ length: 1000 }, (_, i) => `Asset ${i},Computer,OPERATIONAL`).join('\n');
 
       const response = await request(app)

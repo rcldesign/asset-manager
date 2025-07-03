@@ -28,6 +28,7 @@ const config: Config = {
     },
   },
   setupFilesAfterEnv: ['<rootDir>/src/test/env-setup.ts', '<rootDir>/src/test/mock-setup.ts', '<rootDir>/src/test/setup.ts', '<rootDir>/src/test/prisma-singleton.ts'],
+  globalTeardown: '<rootDir>/src/test/teardown.ts',
   testTimeout: 30000,
   detectOpenHandles: true,
   clearMocks: true,
@@ -39,6 +40,9 @@ const config: Config = {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^openid-client$': '<rootDir>/__mocks__/openid-client.js',
     '^speakeasy$': '<rootDir>/__mocks__/speakeasy.js',
+    '^bcrypt$': '<rootDir>/__mocks__/bcrypt.js',
+    '^jsonwebtoken$': '<rootDir>/__mocks__/jsonwebtoken.js',
+    '^qrcode$': '<rootDir>/__mocks__/qrcode.js',
   },
   testPathIgnorePatterns: [
     '<rootDir>/node_modules/',

@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import { encryptionService } from './encryption.service';
 import { addNotificationJob } from '../lib/queue';
 import { logger } from '../utils/logger';
-import type { UserRole, InvitationStatus } from '@prisma/client';
+import type { UserRole, InvitationStatus, PrismaClient } from '@prisma/client';
 
 export interface CreateInvitationData {
   organizationId: string;
@@ -19,7 +19,12 @@ export interface AcceptInvitationData {
 }
 
 export class InvitationService {
+  private prisma: PrismaClient;
   private readonly defaultExpirationHours = 72; // 3 days
+
+  constructor(prismaClient: PrismaClient = prisma) {
+    this.prisma = prismaClient;
+  }
 
   /**
    * Create a new user invitation
@@ -29,7 +34,7 @@ export class InvitationService {
 
     try {
       // Check if user already exists in the organization
-      const existingUser = await prisma.user.findFirst({
+      const existingUser = await this.prisma.user.findFirst({
         where: {
           email: email.toLowerCase(),
           organizationId,
@@ -41,7 +46,7 @@ export class InvitationService {
       }
 
       // Check if there's already a pending invitation
-      const existingInvitation = await prisma.userInvitation.findFirst({
+      const existingInvitation = await this.prisma.userInvitation.findFirst({
         where: {
           email: email.toLowerCase(),
           organizationId,
@@ -61,7 +66,7 @@ export class InvitationService {
       expiresAt.setHours(expiresAt.getHours() + (expirationHours || this.defaultExpirationHours));
 
       // Create invitation
-      const invitation = await prisma.userInvitation.create({
+      const invitation = await this.prisma.userInvitation.create({
         data: {
           organizationId,
           email: email.toLowerCase(),
@@ -129,7 +134,7 @@ export class InvitationService {
 
     try {
       // Find the invitation
-      const invitation = await prisma.userInvitation.findUnique({
+      const invitation = await this.prisma.userInvitation.findUnique({
         where: { token },
         include: {
           organization: true,
@@ -150,7 +155,7 @@ export class InvitationService {
       }
 
       // Check if user already exists
-      const existingUser = await prisma.user.findFirst({
+      const existingUser = await this.prisma.user.findFirst({
         where: {
           email: invitation.email,
           organizationId: invitation.organizationId,
@@ -166,7 +171,7 @@ export class InvitationService {
       const passwordHash = await bcrypt.hash(password, 12);
 
       // Create user and mark invitation as accepted in a transaction
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await this.prisma.$transaction(async (tx) => {
         // Create the user
         const user = await tx.user.create({
           data: {
@@ -240,7 +245,7 @@ export class InvitationService {
    */
   async getInvitationByToken(token: string) {
     try {
-      const invitation = await prisma.userInvitation.findUnique({
+      const invitation = await this.prisma.userInvitation.findUnique({
         where: { token },
         include: {
           organization: {
@@ -306,7 +311,7 @@ export class InvitationService {
       }
 
       const [invitations, total] = await Promise.all([
-        prisma.userInvitation.findMany({
+        this.prisma.userInvitation.findMany({
           where,
           include: {
             invitedBy: {
@@ -320,7 +325,7 @@ export class InvitationService {
           take: limit,
           skip: offset,
         }),
-        prisma.userInvitation.count({ where }),
+        this.prisma.userInvitation.count({ where }),
       ]);
 
       return {
@@ -354,7 +359,7 @@ export class InvitationService {
    */
   async cancelInvitation(invitationId: string, cancelledByUserId: string) {
     try {
-      const invitation = await prisma.userInvitation.findUnique({
+      const invitation = await this.prisma.userInvitation.findUnique({
         where: { id: invitationId },
       });
 
@@ -366,7 +371,7 @@ export class InvitationService {
         throw new Error('Cannot cancel non-pending invitation');
       }
 
-      await prisma.userInvitation.update({
+      await this.prisma.userInvitation.update({
         where: { id: invitationId },
         data: {
           status: 'CANCELLED',
@@ -395,7 +400,7 @@ export class InvitationService {
    */
   async resendInvitation(invitationId: string, resentByUserId: string) {
     try {
-      const invitation = await prisma.userInvitation.findUnique({
+      const invitation = await this.prisma.userInvitation.findUnique({
         where: { id: invitationId },
         include: {
           organization: true,
@@ -421,7 +426,7 @@ export class InvitationService {
       const newExpiresAt = new Date();
       newExpiresAt.setHours(newExpiresAt.getHours() + this.defaultExpirationHours);
 
-      const updatedInvitation = await prisma.userInvitation.update({
+      const updatedInvitation = await this.prisma.userInvitation.update({
         where: { id: invitationId },
         data: {
           token: newToken,
@@ -469,7 +474,7 @@ export class InvitationService {
    */
   async cleanupExpiredInvitations() {
     try {
-      const result = await prisma.userInvitation.updateMany({
+      const result = await this.prisma.userInvitation.updateMany({
         where: {
           status: 'PENDING',
           expiresAt: {
@@ -500,7 +505,7 @@ export class InvitationService {
    * Mark a specific invitation as expired
    */
   private async expireInvitation(invitationId: string) {
-    await prisma.userInvitation.update({
+    await this.prisma.userInvitation.update({
       where: { id: invitationId },
       data: {
         status: 'EXPIRED',

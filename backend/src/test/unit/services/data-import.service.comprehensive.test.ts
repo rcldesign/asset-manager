@@ -1,5 +1,10 @@
-import { DataImportService, ImportOptions, ImportResult, ValidationResult } from '../../../services/data-import.service';
-import { IRequestContext } from '../../../interfaces/context.interface';
+import type { ImportOptions } from '../../../services/data-import.service';
+import {
+  DataImportService,
+  ImportResult,
+  ValidationResult,
+} from '../../../services/data-import.service';
+import type { IRequestContext } from '../../../interfaces/context.interface';
 import { prisma } from '../../../lib/prisma';
 import { AuditService } from '../../../services/audit.service';
 import * as fs from 'fs/promises';
@@ -145,7 +150,9 @@ describe('DataImportService - Comprehensive Tests', () => {
 
       const existingAsset = { id: 'existing-1', name: 'Asset 1' };
       (prisma.asset.findFirst as jest.Mock).mockResolvedValue(existingAsset);
-      (prisma.asset.update as jest.Mock) = jest.fn().mockResolvedValue({ ...existingAsset, category: 'Computer' });
+      (prisma.asset.update as jest.Mock) = jest
+        .fn()
+        .mockResolvedValue({ ...existingAsset, category: 'Computer' });
       (prisma.$transaction as jest.Mock).mockImplementation((fn) => fn(prisma));
 
       const result = await service.importFromCSV('/path/to/file.csv', mockContext, options);
@@ -185,9 +192,7 @@ describe('DataImportService - Comprehensive Tests', () => {
     });
 
     it('should apply field transformations', async () => {
-      const dataWithTransforms = [
-        { name: 'Asset 1', price: '1500.50', active: 'yes' },
-      ];
+      const dataWithTransforms = [{ name: 'Asset 1', price: '1500.50', active: 'yes' }];
 
       (parse as any).mockImplementation((data: any, options: any, callback: any) => {
         callback(null, dataWithTransforms);
@@ -204,7 +209,8 @@ describe('DataImportService - Comprehensive Tests', () => {
           },
           active: {
             targetField: 'status',
-            transform: (value: string) => value.toLowerCase() === 'yes' ? 'OPERATIONAL' : 'MAINTENANCE',
+            transform: (value: string) =>
+              value.toLowerCase() === 'yes' ? 'OPERATIONAL' : 'MAINTENANCE',
           },
         },
       };
@@ -217,7 +223,7 @@ describe('DataImportService - Comprehensive Tests', () => {
       expect(prisma.asset.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           name: 'Asset 1',
-          purchasePrice: 1500.50,
+          purchasePrice: 1500.5,
           status: 'OPERATIONAL',
         }),
       });
@@ -235,7 +241,7 @@ describe('DataImportService - Comprehensive Tests', () => {
       };
 
       await expect(
-        service.importFromCSV('/path/to/file.csv', mockContext, options)
+        service.importFromCSV('/path/to/file.csv', mockContext, options),
       ).rejects.toThrow('Invalid CSV format');
     });
 
@@ -249,7 +255,7 @@ describe('DataImportService - Comprehensive Tests', () => {
       };
 
       await expect(
-        service.importFromCSV('/path/to/file.csv', mockContext, options)
+        service.importFromCSV('/path/to/file.csv', mockContext, options),
       ).rejects.toThrow('File not found');
     });
   });
@@ -323,7 +329,9 @@ describe('DataImportService - Comprehensive Tests', () => {
 
       await service.importFromExcel('/path/to/file.xlsx', mockContext, options);
 
-      expect(XLSX.utils.sheet_to_json).toHaveBeenCalledWith(mockWorkbook.Sheets.Assets, { header: 1 });
+      expect(XLSX.utils.sheet_to_json).toHaveBeenCalledWith(mockWorkbook.Sheets.Assets, {
+        header: 1,
+      });
     });
 
     it('should throw error for non-existent sheet', async () => {
@@ -342,7 +350,7 @@ describe('DataImportService - Comprehensive Tests', () => {
       (XLSX.readFile as jest.Mock).mockReturnValue(mockWorkbook);
 
       await expect(
-        service.importFromExcel('/path/to/file.xlsx', mockContext, options)
+        service.importFromExcel('/path/to/file.xlsx', mockContext, options),
       ).rejects.toThrow('Sheet "NonExistentSheet" not found');
     });
   });
@@ -366,8 +374,18 @@ describe('DataImportService - Comprehensive Tests', () => {
           title: 'title',
           description: 'description',
           priority: 'priority',
-          assetName: { targetField: 'assetId', isLookup: true, lookupEntity: 'asset', lookupField: 'name' },
-          assignedTo: { targetField: 'assignedTo', isLookup: true, lookupEntity: 'user', lookupField: 'email' },
+          assetName: {
+            targetField: 'assetId',
+            isLookup: true,
+            lookupEntity: 'asset',
+            lookupField: 'name',
+          },
+          assignedTo: {
+            targetField: 'assignedTo',
+            isLookup: true,
+            lookupEntity: 'user',
+            lookupField: 'email',
+          },
         },
       };
 
@@ -401,7 +419,12 @@ describe('DataImportService - Comprehensive Tests', () => {
         updateExisting: false,
         fieldMapping: {
           title: 'title',
-          assetName: { targetField: 'assetId', isLookup: true, lookupEntity: 'asset', lookupField: 'name' },
+          assetName: {
+            targetField: 'assetId',
+            isLookup: true,
+            lookupEntity: 'asset',
+            lookupField: 'name',
+          },
         },
       };
 
@@ -596,7 +619,7 @@ describe('DataImportService - Comprehensive Tests', () => {
   describe('getBatchStatus', () => {
     it('should return status of import batch', async () => {
       const batchId = 'batch-123';
-      
+
       // Mock batch status storage (would be in Redis or database)
       const mockStatus = {
         id: batchId,
@@ -665,7 +688,7 @@ describe('DataImportService - Comprehensive Tests', () => {
       (prisma.$transaction as jest.Mock).mockRejectedValue(new Error('Database connection lost'));
 
       await expect(
-        service.importFromCSV('/path/to/file.csv', mockContext, options)
+        service.importFromCSV('/path/to/file.csv', mockContext, options),
       ).rejects.toThrow('Database connection lost');
     });
 
@@ -698,7 +721,7 @@ describe('DataImportService - Comprehensive Tests', () => {
 
       expect(result.totalRecords).toBe(1000);
       expect(result.successCount).toBe(1000);
-      
+
       // Verify batching occurred (should have multiple transaction calls)
       expect((prisma.$transaction as jest.Mock).mock.calls.length).toBeGreaterThan(1);
     });

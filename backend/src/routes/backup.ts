@@ -122,7 +122,7 @@ router.post(
   validateRequest(createBackupSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { type, description, includeDatabase, includeFiles } = req.body;
-    const authUser = req.user!;
+    const authUser = req.user;
     const organizationId = authUser.organizationId;
 
     // Fetch full user from database for backup service
@@ -162,7 +162,7 @@ router.post(
       includesFiles: backup.includesFiles,
       description: backup.description,
     });
-  })
+  }),
 );
 
 /**
@@ -208,7 +208,7 @@ router.post(
 router.get(
   '/list',
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const user = req.user!;
+    const user = req.user;
     const organizationId = user.organizationId;
 
     logger.info('Listing backups', {
@@ -219,7 +219,7 @@ router.get(
     const backups = await backupService.listBackups(organizationId);
 
     res.json(backups);
-  })
+  }),
 );
 
 /**
@@ -290,7 +290,7 @@ router.post(
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { backupId } = req.params;
     const { validateChecksum, rollbackOnFailure, dryRun } = req.body;
-    const authUser = req.user!;
+    const authUser = req.user;
     const organizationId = authUser.organizationId;
 
     // Fetch full user from database for backup service
@@ -322,7 +322,7 @@ router.post(
       backupId,
       restoredAt: new Date().toISOString(),
     });
-  })
+  }),
 );
 
 /**
@@ -366,7 +366,7 @@ router.delete(
   validateRequest(deleteBackupSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { backupId } = req.params;
-    const user = req.user!;
+    const user = req.user;
     const organizationId = user.organizationId;
 
     logger.info('Deleting backup', {
@@ -381,7 +381,7 @@ router.delete(
       message: 'Backup deleted successfully',
       backupId,
     });
-  })
+  }),
 );
 
 export default router;

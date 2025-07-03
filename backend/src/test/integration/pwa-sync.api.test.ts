@@ -67,11 +67,11 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
       // Verify client state was created
       const clientState = await prisma.clientSyncState.findUnique({
-        where: { 
+        where: {
           clientId_organizationId: {
             clientId: 'test-client-123',
             organizationId: testOrganization.id,
-          }
+          },
         },
       });
       expect(clientState).toBeTruthy();
@@ -103,13 +103,13 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
         .expect(200);
 
       expect(response.body.clientId).toBe('existing-client');
-      
+
       const updatedClient = await prisma.clientSyncState.findUnique({
-        where: { 
+        where: {
           clientId_organizationId: {
             clientId: 'existing-client',
             organizationId: testOrganization.id,
-          }
+          },
         },
       });
       expect(updatedClient!.deviceInfo).toMatchObject({ userAgent: 'Updated Browser' });
@@ -143,7 +143,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
     beforeEach(async () => {
       clientId = 'sync-test-client';
-      
+
       // Register client
       await request(app)
         .post('/api/pwa/sync/register')
@@ -223,7 +223,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
       // First, update the asset directly (simulating server-side change)
       await prisma.asset.update({
         where: { id: testAsset.id },
-        data: { 
+        data: {
           status: 'RETIRED',
           updatedAt: new Date(),
         },
@@ -383,7 +383,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
     beforeEach(async () => {
       clientId = 'pull-test-client';
-      
+
       // Register client
       await request(app)
         .post('/api/pwa/sync/register')
@@ -445,9 +445,9 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
       // Second sync should only return new changes
       const response = await request(app)
         .get('/api/pwa/sync/pull')
-        .query({ 
+        .query({
           clientId,
-          since: firstSyncTime
+          since: firstSyncTime,
         })
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
@@ -469,9 +469,9 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
       const response = await request(app)
         .get('/api/pwa/sync/pull')
-        .query({ 
+        .query({
           clientId,
-          limit: 20
+          limit: 20,
         })
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
@@ -495,9 +495,9 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
       const response = await request(app)
         .get('/api/pwa/sync/pull')
-        .query({ 
+        .query({
           clientId,
-          entityTypes: 'Asset'
+          entityTypes: 'Asset',
         })
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
@@ -522,7 +522,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
     beforeEach(async () => {
       clientId = 'conflict-test-client';
-      
+
       // Register client
       await request(app)
         .post('/api/pwa/sync/register')
@@ -557,7 +557,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
       expect(response.body).toHaveProperty('conflicts');
       expect(response.body.conflicts).toHaveLength(1);
-      
+
       const conflict = response.body.conflicts[0];
       expect(conflict).toMatchObject({
         id: testConflict.id,
@@ -588,9 +588,9 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
       const response = await request(app)
         .get('/api/pwa/sync/conflicts')
-        .query({ 
+        .query({
           clientId,
-          status: 'unresolved'
+          status: 'unresolved',
         })
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
@@ -607,7 +607,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
     beforeEach(async () => {
       clientId = 'resolve-test-client';
-      
+
       // Register client
       await request(app)
         .post('/api/pwa/sync/register')
@@ -693,9 +693,9 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
     it('should resolve conflict with manual merge', async () => {
       const resolution = {
         resolution: 'MANUAL_MERGE',
-        mergedData: { 
+        mergedData: {
           status: 'OPERATIONAL',
-          notes: 'Manually resolved conflict'
+          notes: 'Manually resolved conflict',
         },
         resolvedBy: testUser.id,
       };
@@ -744,7 +744,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
     beforeEach(async () => {
       clientId = 'cleanup-test-client';
-      
+
       // Register client
       await request(app)
         .post('/api/pwa/sync/register')
@@ -769,7 +769,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
             userId: testUser.id,
           },
           {
-            id: 'action-2', 
+            id: 'action-2',
             clientId,
             entityType: 'Task',
             entityId: 'test-task',
@@ -790,11 +790,11 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
       // Verify client state was deleted
       const clientState = await prisma.clientSyncState.findUnique({
-        where: { 
+        where: {
           clientId_organizationId: {
             clientId,
             organizationId: testOrganization.id,
-          }
+          },
         },
       });
       expect(clientState).toBeNull();
@@ -819,7 +819,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
     beforeEach(async () => {
       clientId = 'status-test-client';
-      
+
       // Register client
       await request(app)
         .post('/api/pwa/sync/register')
@@ -900,7 +900,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
   describe('Performance and error handling', () => {
     it('should handle large sync payloads efficiently', async () => {
       const clientId = 'performance-test-client';
-      
+
       await request(app)
         .post('/api/pwa/sync/register')
         .send({
@@ -950,7 +950,7 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
 
     it('should handle database errors during sync', async () => {
       const clientId = 'error-test-client';
-      
+
       await request(app)
         .post('/api/pwa/sync/register')
         .send({
@@ -968,15 +968,17 @@ conditionalDescribe('PWA Sync API Integration Tests', () => {
         .post('/api/pwa/sync/changes')
         .send({
           clientId,
-          changes: [{
-            id: 'error-change',
-            entityType: 'Asset',
-            entityId: 'test-asset',
-            action: 'UPDATE',
-            data: { status: 'MAINTENANCE' },
-            timestamp: new Date().toISOString(),
-            clientTimestamp: Date.now(),
-          }],
+          changes: [
+            {
+              id: 'error-change',
+              entityType: 'Asset',
+              entityId: 'test-asset',
+              action: 'UPDATE',
+              data: { status: 'MAINTENANCE' },
+              timestamp: new Date().toISOString(),
+              clientTimestamp: Date.now(),
+            },
+          ],
         })
         .set('Authorization', `Bearer ${authToken}`)
         .expect(500);

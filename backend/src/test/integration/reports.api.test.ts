@@ -109,9 +109,7 @@ conditionalDescribe('Reports API Integration Tests', () => {
     });
 
     it('should require authentication', async () => {
-      await request(app)
-        .get('/api/reports')
-        .expect(401);
+      await request(app).get('/api/reports').expect(401);
     });
   });
 
@@ -482,7 +480,7 @@ conditionalDescribe('Reports API Integration Tests', () => {
 
       expect(response.body).toHaveProperty('templates');
       expect(response.body.templates).toBeInstanceOf(Array);
-      
+
       const templates = response.body.templates;
       expect(templates).toEqual(
         expect.arrayContaining([
@@ -492,7 +490,7 @@ conditionalDescribe('Reports API Integration Tests', () => {
             description: expect.any(String),
             parameters: expect.any(Object),
           }),
-        ])
+        ]),
       );
     });
 
